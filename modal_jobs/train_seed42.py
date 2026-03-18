@@ -64,7 +64,7 @@ MIN_LR       = 3e-5
 WARMUP_STEPS = 200
 WEIGHT_DECAY = 0.1
 GRAD_CLIP    = 1.0
-VAL_EVERY    = 5
+VAL_EVERY    = 1
 VAL_BATCHES  = 20
 
 
@@ -91,7 +91,6 @@ def train() -> None:
     sys.path.insert(0, str(CODE_DIR))
 
     import torch
-    import modal
 
     from model import ModelConfig, TransformerLM
     from data import (
@@ -104,8 +103,6 @@ def train() -> None:
 
     # ── Setup ────────────────────────────────────────────────────────────────
     device = torch.device("cuda")
-
-    modal.app.App.lookup(APP_NAME)  # ensure we're in the right app context
 
     print(f"\n{'=' * 64}")
     print(f"  Developmental Trajectories — Seed 42 Training Run")

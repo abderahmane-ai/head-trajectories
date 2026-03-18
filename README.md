@@ -150,11 +150,16 @@ Total: ~100 checkpoints per run.
 
 | Type | Metric | Threshold |
 |------|--------|-----------|
-| SINK | Max attention weight per row (mean) | > 0.40 |
-| PREV\_TOKEN | Attention to position t-1 (mean) | > 0.50 |
-| INDUCTION | Attention to token after first occurrence | > 0.30 |
-| POSITIONAL | 1 – KL div between same-length seqs | > 0.70 |
-| SEMANTIC | Pearson corr with cosine embedding sim | > 0.30 |
+| SINK | Max attention weight per row (mean) | Calibrated |
+| PREV\_TOKEN | Attention to position t-1 (mean) | Calibrated |
+| INDUCTION | Attention to token after first occurrence | Calibrated |
+| POSITIONAL | 1 – KL div between same-length seqs | Calibrated |
+| SEMANTIC | Pearson corr with cosine embedding sim | Calibrated |
+
+Thresholds are calibrated from random baseline: initialize random models, shuffle
+attention rows, compute scores, set threshold = mean + 2*std. This ensures heads
+score 2 standard deviations above random noise. Separate calibration for 15M and
+6M models (see `data/calibration.py`).
 
 Classification: `argmax(scores / thresholds)` with UNDIFFERENTIATED fallback
 if all scores are below threshold, or if the top two normalized scores are

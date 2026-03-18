@@ -47,7 +47,7 @@ We run 3 seeds and report inter-seed agreement. Controls include threshold sensi
 Cost-benefit tradeoff. 3 seeds provide reasonable confidence while keeping compute costs under $25.
 
 ### How were thresholds chosen?
-Calibrated on a separate validation set to achieve ~10% false positive rate per type. See `data/calibration.py`.
+Calibrated from random baseline: initialize random models (15M and 6M), shuffle attention rows to destroy structure, compute all 5 scores, set threshold = mean + 2*std. This ensures heads must score 2 standard deviations above random noise to be classified. Calibration runs 3 seeds and reports stability. See `data/calibration.py`.
 
 ### What about other head types?
 The five types we study are the most well-documented. The framework is extensible - you can add new scoring functions.
