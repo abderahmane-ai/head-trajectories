@@ -1,0 +1,22 @@
+# Include documentation
+include README.md
+include LICENSE
+include CHANGELOG.md
+include CONTRIBUTING.md
+
+# Include configuration files
+include requirements.txt
+include pytest.ini
+
+# Include GitHub templates
+recursive-include .github *.md *.yml
+
+# Exclude unnecessary files
+exclude foo
+recursive-exclude __pycache__ *
+recursive-exclude *.py[cod] *
+recursive-exclude .pytest_cache *
+recursive-exclude htmlcov *
+recursive-exclude checkpoints *
+recursive-exclude results *
+recursive-exclude figures *
