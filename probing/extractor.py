@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from model import TransformerLM, ModelConfig
-from data import load_probe_dataset
 
 
 # ─────────────────────────────────────────────────────────────────────────────

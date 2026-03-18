@@ -19,8 +19,6 @@ import time
 import torch
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
-from data import load_probe_dataset
 from .extractor import extract_checkpoint, CheckpointExtraction
 from .scores import score_head
 from .classifier import HeadClassifier, HEAD_TYPES, THRESHOLDS
@@ -169,6 +167,8 @@ def run_probing_pipeline(
     print(f"  Resume mode    : {resume}")
     print()
 
+    # Import here to avoid circular dependency
+    from data import load_probe_dataset
     probe_dict = load_probe_dataset(probe_path)
     if use_heldout:
         required = {
