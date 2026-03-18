@@ -106,7 +106,7 @@ modal volume get trajectories-ckpts-ablation6m /checkpoints/ablation_6m
 ### 6. Run the probing pipeline
 
 Scores all five behavioral metrics for every head at every checkpoint.
-Expected runtime: 3–5 hours per run (CPU only, no GPU needed).
+Expected runtime: ~5-10 minutes per run (CPU only, no GPU needed) after vectorization optimizations.
 
 ```bash
 python run_probing.py
@@ -115,6 +115,11 @@ python run_probing.py
 Run a single seed:
 ```bash
 python run_probing.py --seed 42
+```
+
+Dry run (estimate time without processing):
+```bash
+python run_probing.py --seed 42 --dry_run
 ```
 
 ### 7. Run analysis and produce all figures
@@ -189,28 +194,7 @@ within 0.05 of each other (tie logged to `results/ties.csv`).
 | ablation (6M) | A100 | ~3h | ~$4 |
 | **Total** | | **~18h** | **~$22** |
 
-Probing pipeline (CPU): ~3–5h per run, no additional GPU cost.
-
-## Citation
-
-If you use this codebase, please cite:
-
-```bibtex
-@misc{abderahmane2025developmental,
-  title   = {Developmental Trajectories of Attention Heads},
-  author  = {Abderahmane},
-  year    = {2025},
-  note    = {Independent research, ENSIA Algeria}
-}
-```
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Probing pipeline (CPU): ~5-10 minutes per run after vectorization, no additional GPU cost.
 
 ## Citation
 
@@ -225,6 +209,14 @@ If you use this codebase in your research, please cite:
   note    = {Independent research, ENSIA Algeria}
 }
 ```
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
