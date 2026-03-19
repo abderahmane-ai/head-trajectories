@@ -16,7 +16,6 @@ import time
 from pathlib import Path
 
 import modal
-from modal.mount import Mount
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Modal app and infrastructure
@@ -44,6 +43,7 @@ image = (
         "huggingface_hub",
         "tqdm",
     )
+    .add_local_dir(".", remote_path="/code")
 )
 
 # Mount paths inside the container
@@ -80,9 +80,6 @@ VAL_BATCHES  = 20
         str(CKPT_DIR.parent):  ckpt_volume,
         str(PROBE_DIR):        probe_volume,
     },
-    mounts=[
-        Mount.from_local_dir(".", remote_path=str(CODE_DIR))
-    ],
 )
 def train() -> None:
     """Full training run for seed 42 on A100."""

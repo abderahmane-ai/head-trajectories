@@ -10,7 +10,6 @@ Run with:
 
 from pathlib import Path
 import modal
-from modal.mount import Mount
 
 APP_NAME          = "trajectories-seed777"
 VOLUME_NAME       = "trajectories-ckpts-seed777"
@@ -27,6 +26,7 @@ image = (
         "torch==2.3.0", "numpy", "tiktoken",
         "datasets", "transformers", "huggingface_hub", "tqdm",
     )
+    .add_local_dir(".", remote_path="/code")
 )
 
 CKPT_DIR  = Path("/checkpoints/seed777")
@@ -54,9 +54,6 @@ VAL_BATCHES  = 20
         str(CKPT_DIR.parent): ckpt_volume,
         str(PROBE_DIR):       probe_volume,
     },
-    mounts=[
-        Mount.from_local_dir(".", remote_path=str(CODE_DIR))
-    ],
 )
 def train() -> None:
     """Full training run for seed 777 on A100."""

@@ -14,7 +14,6 @@ Run with:
 
 from pathlib import Path
 import modal
-from modal.mount import Mount
 
 APP_NAME          = "trajectories-ablation-6m"
 VOLUME_NAME       = "trajectories-ckpts-ablation6m"
@@ -31,6 +30,7 @@ image = (
         "torch==2.3.0", "numpy", "tiktoken",
         "datasets", "transformers", "huggingface_hub", "tqdm",
     )
+    .add_local_dir(".", remote_path="/code")
 )
 
 CKPT_DIR  = Path("/checkpoints/ablation_6m")
@@ -59,9 +59,6 @@ VAL_BATCHES  = 20
         str(CKPT_DIR.parent): ckpt_volume,
         str(PROBE_DIR):       probe_volume,
     },
-    mounts=[
-        Mount.from_local_dir(".", remote_path=str(CODE_DIR))
-    ],
 )
 def train() -> None:
     """Scale ablation: 6M parameter model, seed 42, A100."""
