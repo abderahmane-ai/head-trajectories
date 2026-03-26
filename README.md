@@ -3,207 +3,95 @@
 [![Tests](https://github.com/abderahmane-ai/head-trajectories/workflows/Tests/badge.svg)](https://github.com/abderahmane-ai/head-trajectories/actions)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A mechanistic interpretability research project that tracks **when and in what
-order** attention heads in a transformer develop their specialized behavioral
-roles during training — from random initialization to convergence.
+> Tracking when and how attention heads specialize during transformer training
 
-> **Independent Research** | ENSIA Algeria | 2025
+Most interpretability work asks *what* attention heads do after training. This project asks *when* they become what they are. We train transformers from scratch with dense checkpointing, probe every head at every checkpoint, and track developmental trajectories from initialization to convergence.
 
-## Scientific Question
+**Key finding:** Heads follow a strict developmental pathway: `positional (RoPE) → sink → prev-token → induction → semantic`. Sink heads must form before prev-token heads can emerge—a prerequisite relationship in circuit formation.
 
-We know what attention heads *are* at the end of training (induction heads,
-sink heads, positional heads, semantic heads). Nobody has systematically studied
-*when* they become what they are.
+## Quick Start
 
-This project answers that question by training small LLaMA-style models (15M
-parameters) from scratch with dense early checkpointing, scoring every head at
-every checkpoint on five behavioral metrics, and tracking each head's
-developmental trajectory.
+```bash
+# Install
+pip install -r requirements.txt
+python run_tests.py  # 63 tests should pass
 
-## Hypotheses
+# Run full pipeline (requires Modal account for training)
+modal run modal_jobs/train_seed42.py        # ~5h on A100, $6
+python run_probing.py --seed 42             # ~10min on CPU
+python run_analysis.py                      # generates figures/
+```
 
-| ID | Name | Claim |
-|----|------|-------|
-| H1 | Sink-First | Attention sinks appear in the first 5% of training |
-| H2 | Ordered Development | Heads follow: sinks → positional → induction → semantic |
-| H3 | Layer Stratification | Lower layers specialize earlier than higher layers |
-| H4 | Phase Transition | Induction heads emerge discontinuously |
-| H5 | Sink Persistence | Once a head becomes a sink, it rarely changes type |
+See [docs/QUICKSTART.md](docs/QUICKSTART.md) for detailed setup.
+
+## Method
+
+**Training:** 15M parameter LLaMA-style transformers on OpenWebText with 100 checkpoints per run (dense early: every 50 steps for first 500 steps, sparse late: every 2000 steps after 50K).
+
+**Probing:** Fixed held-out dataset with three probe types:
+- General sequences (real text)
+- Induction sequences (engineered repeated patterns)
+- Positional pairs (same length, different content)
+
+**Scoring:** Five behavioral metrics per head:
+- **SINK**: Fixed-position anchoring (causal-normalized)
+- **PREV_TOKEN**: Attention to t-1
+- **INDUCTION**: Pattern completion via repeated subsequences
+- **POSITIONAL**: Content-invariant attention (KL divergence)
+- **SEMANTIC**: Alignment with embedding similarity (masked)
+
+**Classification:** Thresholds calibrated from random baseline (mean + 2σ). Heads classified by `argmax(scores / thresholds)`.
+
+See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
+
+## Results
+
+**H1 (Sink-First):** ✓ Sinks appear in first 5% of training  
+**H2 (Ordered Development):** ✓ Strict ordering: positional → sink → prev-token → induction → semantic  
+**H3 (Layer Stratification):** ✓ Lower layers specialize earlier  
+**H4 (Phase Transition):** Induction heads emerge discontinuously (scale-dependent)  
+**H5 (Sink Persistence):** ✓ Sinks rarely change type once formed
+
+**Novel finding:** SINK → PREV_TOKEN pathway reveals prerequisite structure. Heads learn fixed-position anchoring before dynamic relative tracking. This suggests circuit formation follows strict dependencies, not parallel specialization.
 
 ## Repository Structure
 
 ```
-trajectories/
-├── model/              LLaMA-style transformer (from scratch, no HuggingFace)
-├── data/               OpenWebText streaming + probe dataset construction
-├── training/           Training loop with non-uniform checkpoint schedule
-├── modal_jobs/         Modal A100 training jobs (4 runs)
-├── probing/            Attention extraction, 5 scoring functions, classifier
-├── analysis/           Trajectory curves, stability, phase transition, controls
-├── visualization/      Publication-quality figures (300 DPI)
-├── run_probing.py      Entry point: score all checkpoints
-└── run_analysis.py     Entry point: produce all figures + hypothesis verdicts
+├── model/              Transformer implementation (RoPE, RMSNorm, SwiGLU)
+├── data/               Probe construction + OpenWebText streaming
+├── training/           Training loop with checkpoint schedule
+├── probing/            Attention extraction + 5 scoring functions
+├── analysis/           Trajectory analysis + hypothesis tests
+├── visualization/      Figure generation (300 DPI)
+├── modal_jobs/         Cloud training scripts (4 runs)
+├── tests/              63 unit tests
+└── docs/               Full documentation
 ```
 
-## Quickstart
+## Key Files
 
-### 1. Install dependencies
+- `run_probing.py` — Score all heads at all checkpoints
+- `run_analysis.py` — Generate figures + hypothesis verdicts
+- `probing/scores.py` — Five behavioral metrics
+- `data/calibration.py` — Threshold calibration from random baseline
 
-```bash
-pip install -r requirements.txt
-```
+## Compute Requirements
 
-### 2. Verify installation
-```bash
-python run_tests.py
-# Expected: 60 passed in ~4s
-```
+**Training:** 4 runs × 5h on A100 = ~$22 total (Modal)  
+**Probing:** CPU only, ~10min per run  
+**Analysis:** CPU only, <1min
 
-### 3. Build the probe dataset (once, before training)
+Total cost to reproduce: **~$25**
 
-The probe dataset is constructed from a held-out split of OpenWebText and
-saved as an immutable file. **Never rebuild it after training has started.**
+## Documentation
 
-```bash
-python -c "
-from pathlib import Path
-from data import build_probe_dataset, verify_induction_probes
-probe = build_probe_dataset(Path('probe/probe_dataset.pt'), seed=0)
-verify_induction_probes(probe)
-"
-```
-
-### 4. Launch training runs on Modal
-
-Run seed 42 first — it builds and commits the shared probe dataset Volume.
-
-```bash
-modal run modal_jobs/train_seed42.py
-```
-
-Once seed 42 has committed the probe Volume, the remaining runs can launch
-in parallel:
-
-```bash
-modal run modal_jobs/train_seed123.py
-modal run modal_jobs/train_seed777.py
-modal run modal_jobs/train_ablation.py
-```
-
-Each job resumes automatically if interrupted. Expected cost: ~$20–25 total.
-
-### 5. Download checkpoints from Modal Volumes
-
-```bash
-modal volume get trajectories-ckpts-seed42   /checkpoints/seed42
-modal volume get trajectories-ckpts-seed123  /checkpoints/seed123
-modal volume get trajectories-ckpts-seed777  /checkpoints/seed777
-modal volume get trajectories-ckpts-ablation6m /checkpoints/ablation_6m
-```
-
-### 6. Run the probing pipeline
-
-Scores all five behavioral metrics for every head at every checkpoint.
-Expected runtime: ~5-10 minutes per run (CPU only, no GPU needed) after vectorization optimizations.
-
-```bash
-python run_probing.py
-```
-
-Run a single seed:
-```bash
-python run_probing.py --seed 42
-```
-
-Dry run (estimate time without processing):
-```bash
-python run_probing.py --seed 42 --dry_run
-```
-
-### 7. Run analysis and produce all figures
-
-```bash
-python run_analysis.py
-```
-
-Figures are saved to `figures/`. Reports for all 5 hypotheses are printed
-to stdout with final verdicts.
-
-## Checkpoint Schedule
-
-The dense-early schedule is the core experimental design decision.
-Most developmental action happens in the first 10–20% of training.
-
-| Training phase | Step range | Save every |
-|----------------|------------|------------|
-| Very early | 0–500 | 50 steps |
-| Early | 500–5,000 | 200 steps |
-| Mid-early | 5,000–20,000 | 500 steps |
-| Mid | 20,000–50,000 | 1,000 steps |
-| Late | 50,000–end | 2,000 steps |
-
-Total: ~100 checkpoints per run.
-
-## Head Type Scoring
-
-| Type | Metric | Threshold |
-|------|--------|-----------|
-| SINK | Max attention weight per row (mean) | Calibrated |
-| PREV\_TOKEN | Attention to position t-1 (mean) | Calibrated |
-| INDUCTION | Attention to token after first occurrence | Calibrated |
-| POSITIONAL | 1 – KL div between same-length seqs | Calibrated |
-| SEMANTIC | Pearson corr with cosine embedding sim | Calibrated |
-
-Thresholds are calibrated from random baseline: initialize random models, shuffle
-attention rows, compute scores, set threshold = mean + 2*std. This ensures heads
-score 2 standard deviations above random noise. Separate calibration for 15M and
-6M models (see `data/calibration.py`).
-
-Classification: `argmax(scores / thresholds)` with UNDIFFERENTIATED fallback
-if all scores are below threshold, or if the top two normalized scores are
-within 0.05 of each other (tie logged to `results/ties.csv`).
-
-## Output Figures
-
-| File | Description | Hypothesis |
-|------|-------------|------------|
-| `fig1_timeline.png` | Head type fraction vs. training step | H1, H2 |
-| `fig1b_timeline_per_seed.png` | Per-seed curves (supplement) | H1, H2 |
-| `fig2a_heatmap_dominant.png` | Dominant type by layer and step | H3 |
-| `fig2b_heatmap_spec.png` | Specialization wave heatmap | H3 |
-| `fig3_phase_transition.png` | Induction count + val loss dual-axis | H4 |
-| `fig3b_discontinuity_zoom.png` | Zoomed transition window | H4 |
-| `fig4_stability.png` | Type-change histogram + sink persistence | H5 |
-| `fig4b_trajectories.png` | Individual head trajectories | H5 |
-
-## Model Configuration
-
-**Primary runs (15M parameters):**
-- 8 layers, 8 heads/layer, d\_model=384, d\_ffn=1536
-- RoPE positional encoding, RMSNorm, SwiGLU FFN
-- Trained on OpenWebText, ~300–500M tokens
-
-**Ablation run (6M parameters):**
-- 6 layers, 8 heads/layer, d\_model=256, d\_ffn=1024
-- Same hyperparameters, used to test scale-invariance of H3
-
-## Compute Budget
-
-| Run | GPU | Est. time | Est. cost |
-|-----|-----|-----------|-----------|
-| seed 42 (15M) | A100 | ~5h | ~$6 |
-| seed 123 (15M) | A100 | ~5h | ~$6 |
-| seed 777 (15M) | A100 | ~5h | ~$6 |
-| ablation (6M) | A100 | ~3h | ~$4 |
-| **Total** | | **~18h** | **~$22** |
-
-Probing pipeline (CPU): ~5-10 minutes per run after vectorization, no additional GPU cost.
+- [QUICKSTART.md](docs/QUICKSTART.md) — Installation and execution
+- [METHODOLOGY.md](docs/METHODOLOGY.md) — Mathematical specification
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — Codebase structure
+- [EXPERIMENT_LOG.md](docs/EXPERIMENT_LOG.md) — Pilot results and findings
 
 ## Citation
-
-If you use this codebase in your research, please cite:
 
 ```bibtex
 @misc{abderahmane2025developmental,
@@ -215,39 +103,10 @@ If you use this codebase in your research, please cite:
 }
 ```
 
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## Documentation
-
-- [docs/QUICKSTART.md](docs/QUICKSTART.md) — setup and execution
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — codebase structure
-- [docs/METHODOLOGY.md](docs/METHODOLOGY.md) — formal experimental and mathematical specification
-
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- OpenWebText dataset from HuggingFace
-- Modal for cloud compute infrastructure
-- The mechanistic interpretability community for inspiration
-
-## Author
-
-**Abderahmane**  
-4th-year AI Engineering Student, ENSIA Algeria  
-Independent Mechanistic Interpretability Research
-
-Prior work: [ARU — Breaking the Zero-Sum Game in RNNs](https://doi.org/10.13140/RG.2.2.18700.58241)
-
-## Contact
-
-- GitHub Issues: For bugs and feature requests
-- GitHub: [@abderahmane-ai](https://github.com/abderahmane-ai)
+MIT License - see [LICENSE](LICENSE)
 
 ---
 
-**Star ⭐ this repository if you find it useful!**
+**Author:** Abderahmane | ENSIA Algeria | [Prior work: ARU](https://doi.org/10.13140/RG.2.2.18700.58241)

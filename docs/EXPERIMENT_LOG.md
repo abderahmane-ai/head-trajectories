@@ -59,7 +59,11 @@ By tracing individual head trajectories across the 12 checkpoints, a clear evolu
 *   `Layer 1, Head 6`: `POS` $\rightarrow$ `UNDIFF` $\rightarrow$ `SINK` $\rightarrow$ `PREV` 
 *   `Layer 2, Head 2`: `POS` $\rightarrow$ `SINK` $\rightarrow$ `PREV`
 
-This suggests a strict dependency structure in circuit formation: **To become a previous-token head, a head must first learn to be a sink.** It first learns to focus its attention sharply on a single token (`SINK` status), before it figures out how to dynamically and consistently slide that focused attention to $t-1$ (`PREV_TOKEN` status).
+**Note on metric evolution:** This pilot used the original SINK metric (measuring sharpness/concentration). The interpretation was: "heads learn to focus sharply before learning WHERE to focus." 
+
+After the pilot, the SINK metric was revised to measure fixed-position anchoring (with causal-mask normalization) rather than sharpness. This change separates true sink heads (anchoring to a fixed position, score ~1.0) from prev-token heads (sliding argmax, score ~0.5). The revised metric provides a mechanistically crisper interpretation: **heads learn fixed-position anchoring before learning dynamic relative tracking.**
+
+The OpenWebText runs use the revised metric, so the SINK → PREV_TOKEN pathway will measure: "fixed anchoring precedes dynamic tracking" rather than "sharpness precedes directional sharpness."
 
 **3. Layer Stratification**
 Lower layers and higher layers specialize differently:

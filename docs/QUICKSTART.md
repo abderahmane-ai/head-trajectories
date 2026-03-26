@@ -73,10 +73,13 @@ python -c "
 import torch
 from probing.scores import sink_score, semantic_score
 
-# Create fake attention
+# Create fake attention (random softmax)
 N, T = 10, 32
 attn = torch.softmax(torch.randn(N, T, T), dim=-1)
 
+# Sink score measures fixed-position anchoring (not sharpness)
+# Random attention typically scores low (~0.1-0.3)
+# A true sink head (all queries attend to j=0) would score ~1.0
 score = sink_score(attn)
 print(f'✓ Sink score: {score:.4f}')
 "

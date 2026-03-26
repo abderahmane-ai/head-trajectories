@@ -182,28 +182,30 @@ Below, we suppress $(k,\ell,h)$ in the notation for readability.
 
 ### 5.1 Sink score
 
-**Intuition:** a sink head puts most of its mass on one token, often a fixed token such as the first token or a sink-like position.
+**Intuition:** a sink head anchors attention to a fixed absolute position (e.g., token 0) regardless of query position or sequence content. This is distinct from sharpness: a previous-token head is sharp but its argmax slides with $t$, so it does not score high on this metric.
 
 For general probes $A^{\text{gen}}_n$, define:
 
 $$
 s_{\text{sink}}
 =
-\frac{1}{N_g T}
-\sum_{n=1}^{N_g}\sum_{t=0}^{T-1}
-\max_{0 \le j < T} A^{\text{gen}}_n[t,j].
+\max_{j=0}^{T-1}
+\left(
+\frac{1}{N_g}
+\sum_{n=1}^{N_g}
+\frac{\sum_{t=0}^{T-1} A^{\text{gen}}_n[t,j]}{T - j}
+\right).
 $$
+
+The normalization by $(T - j)$ accounts for causal mask geometry: key position $j$ is reachable from exactly $(T - j)$ query positions. We divide by this count to get the mean attention per reachable query, then average across sequences and take the maximum over key positions.
 
 Interpretation:
 
-- If each row is diffuse, the maximum row weight is small.
-- If each row sharply concentrates on one key, the score is large.
+- A true sink head routes all queries to the same fixed position, yielding a score near 1.0.
+- A previous-token head distributes attention across all key positions (each query attends to a different key), yielding a score around 0.5.
+- Uniform causal attention yields a score around $1/T$.
 
-Range in practice:
-
-$$
-s_{\text{sink}} \in \left[\frac{1}{T}, 1\right].
-$$
+**Note:** Random unconstrained softmax attention can occasionally produce scores slightly above 1.0 due to variance, but this is rare in practice with learned causal attention patterns.
 
 ---
 
@@ -355,10 +357,17 @@ c_{n,t} =
 \bigr).
 $$
 
-Then compute the Pearson correlation
+**Exclusion masking:** Before computing correlation, we remove three confounded positions:
+- $j = t$ (identity position, cosine similarity always 1.0)
+- $j = t-1$ (previous-token position, confounds with prev-token heads)
+- $j = 0$ (sink position, confounds with sink heads)
+
+Let $M_{n,t}$ be the mask that excludes these positions. We require $|M_{n,t}| \ge 6$ (minimum 6 valid points for stable Pearson correlation). If fewer than 6 points remain after masking, position $t$ is skipped.
+
+Then compute the Pearson correlation on the masked vectors:
 
 $$
-\rho(a_{n,t}, c_{n,t})
+\rho(a_{n,t} \odot M_{n,t}, c_{n,t} \odot M_{n,t})
 =
 \frac{
 \mathbb{E}\!\left[(a_{n,t} - \bar a_{n,t})(c_{n,t} - \bar c_{n,t})\right]
@@ -367,22 +376,22 @@ $$
 },
 $$
 
-for all $(n,t)$ where both standard deviations are nonzero and the correlation is finite.
+for all $(n,t)$ where both standard deviations are nonzero, the correlation is finite, and $|M_{n,t}| \ge 6$.
 
-The semantic score is the empirical mean:
+The semantic score is the empirical mean over valid masked positions:
 
 $$
 s_{\text{sem}}
 =
 \mathbb{E}_{(n,t)\in\mathcal{V}}
-\bigl[\rho(a_{n,t}, c_{n,t})\bigr],
+\bigl[\rho(a_{n,t} \odot M_{n,t}, c_{n,t} \odot M_{n,t})\bigr],
 $$
 
-where $\mathcal{V}$ is the set of valid sequence-position pairs.
+where $\mathcal{V}$ is the set of valid sequence-position pairs with sufficient unmasked points.
 
 Interpretation:
 
-- Positive values mean attention aligns with semantic similarity.
+- Positive values mean attention aligns with semantic similarity (after removing structural confounds).
 - Near-zero values mean little semantic alignment.
 - Negative values mean the head anti-correlates with semantic similarity.
 
@@ -609,12 +618,17 @@ Sinks should appear earliest. Operationally:
 Expected order:
 
 $$
-\text{sinks} \rightarrow \text{positional} \rightarrow \text{induction} \rightarrow \text{semantic}.
+\text{positional (architectural)} \rightarrow \text{sink} \rightarrow \text{prev\_token} \rightarrow \text{induction} \rightarrow \text{semantic}.
 $$
+
+**Note on positional onset:** Positional heads appear at step 0 due to Rotary Position Embeddings (RoPE), which create deterministic position-based attention patterns before any learning occurs. This is an architectural feature, not learned behavior. The hypothesis distinguishes:
+- **Architectural positional**: RoPE-driven structure at initialization (step 0)
+- **Learned specialization**: Sink, prev-token, induction, and semantic behaviors that emerge during training
 
 Operationally:
 
 - compare onset ordering across type-fraction curves
+- distinguish architectural onset (step 0) from learned onset (first step where fraction exceeds threshold during training)
 
 ### H3. Layer stratification
 

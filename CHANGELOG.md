@@ -36,6 +36,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING**: SINK metric now measures fixed-position anchoring instead of sharpness
+  - Uses causal-mask normalization: divides by number of reachable queries per key position
+  - Separates true sink heads (score ~1.0) from prev-token heads (score ~0.5)
+  - Previous "sharpness" metric conflated sink and prev-token behaviors
+- **BREAKING**: SEMANTIC metric now uses exclusion masking to remove confounds
+  - Masks out j=0 (sink), j=t-1 (prev-token), j=t (identity) before computing Pearson
+  - Requires minimum 6 valid points for stable correlation
+  - Prevents structural confounds from inflating semantic scores
+
+### Fixed
+- Removed dead `causal_mask` variable in `semantic_score` function
+
+### Added
+- Regression test validating SINK vs PREV_TOKEN separation
+- Mask validation test for SEMANTIC exclusion masking
+- Detailed mathematical documentation in METHODOLOGY.md
+
 ### Planned
 - Additional visualization options
 - Extended analysis for layer stratification (H3)

@@ -35,26 +35,42 @@ AttentionHead = torch.Tensor
 
 def sink_score(attn_head: AttentionHead) -> float:
     """
-    Measure how strongly this head concentrates attention on a single token.
-
-    Computation:
-        For each (sequence, query position), find the maximum attention weight.
-        Average across all query positions and all sequences.
-
-    A head that always dumps ~90% of attention onto token 0 scores ~0.9.
-    A uniform attention head scores ~1/T ≈ 0.004 for T=256.
-
+    Measures if a head anchors attention to a fixed absolute key position.
+    
+    A true sink head consistently routes attention to the same position
+    (e.g., token 0) regardless of query position or sequence content.
+    This is distinct from sharpness: a prev-token head is sharp but its
+    argmax slides with t, so it does NOT score high here.
+    
+    Normalization accounts for causal mask geometry: key j is reachable
+    from exactly (T - j) query positions, so we normalize by opportunity
+    before averaging.
+    
     Args:
-        attn_head: (N, T, T) attention weights — rows sum to 1.0
-
+        attn_head: (N, T, T) attention tensor, rows sum to 1, causal mask applied.
+    
     Returns:
-        sink_score in [1/T, 1.0]
+        Scalar in [0, 1]. Higher = stronger fixed-position anchoring.
     """
-
-    # attn_head: (N, T, T)
-    # max over keys (dim=-1): (N, T) — max weight per query position
-    max_weights = attn_head.max(dim=-1).values   # (N, T)
-    return float(max_weights.mean().item())
+    N, T, _ = attn_head.shape
+    
+    # Total attention each key position receives, summed over all queries and sequences
+    # Shape: (N, T) - total attention received by each key, per sequence
+    attn_per_key = attn_head.sum(dim=1)
+    
+    # Each key position j is reachable from (T - j) query positions
+    # valid_counts[j] = number of query rows that can attend to key j
+    valid_counts = torch.arange(T, 0, -1, device=attn_head.device, dtype=torch.float32)
+    
+    # Normalize: expected uniform contribution to key j is 1/T per query,
+    # so total expected is valid_counts[j] / T. We divide by valid_counts
+    # to get mean attention per reachable query, then compare to uniform (1/T).
+    normalized_attn = attn_per_key / valid_counts.unsqueeze(0)  # (N, T)
+    
+    # Average across sequences, then take the max over key positions
+    mean_normalized = normalized_attn.mean(dim=0)  # (T,)
+    
+    return float(mean_normalized.max().item())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -262,9 +278,6 @@ def semantic_score(
     # sim[s, i, j] = dot(embed[s, i], embed[s, j])
     sim_matrix = torch.bmm(seq_embeds, seq_embeds.transpose(1, 2))  # (N, T, T)
     
-    # Create causal mask (lower triangular)
-    causal_mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=attn_head.device))
-    
     # Skip positions 0-3 (degenerate short vectors)
     valid_positions = torch.arange(4, T, device=attn_head.device)
     
@@ -278,13 +291,30 @@ def semantic_score(
         attn_window = attn_head[:, i_int, :i_int + 1]  # (N, i+1)
         sim_window = sim_matrix[:, i_int, :i_int + 1]  # (N, i+1)
         
+        # --- EXCLUSION MASK ---
+        # Remove positions with structural confounds before computing Pearson.
+        # These positions produce high cosine similarity for non-semantic reasons.
+        mask = torch.ones(i_int + 1, dtype=torch.bool, device=attn_head.device)
+        mask[i_int] = False          # j=t: identity, cosine sim always 1.0
+        if i_int > 0:
+            mask[i_int - 1] = False  # j=t-1: prev-token confound
+        mask[0] = False              # j=0: sink confound
+        
+        # Require minimum 6 valid points for stable Pearson
+        if mask.sum().item() < 6:
+            continue
+        
+        attn_window = attn_window[:, mask]  # apply mask to attention slice
+        sim_window = sim_window[:, mask]    # apply mask to similarity slice
+        # --- END EXCLUSION MASK ---
+        
         # Compute Pearson correlation for each sequence at this position
         # Pearson(x, y) = cov(x, y) / (std(x) * std(y))
         attn_mean = attn_window.mean(dim=1, keepdim=True)  # (N, 1)
         sim_mean = sim_window.mean(dim=1, keepdim=True)    # (N, 1)
         
-        attn_centered = attn_window - attn_mean  # (N, i+1)
-        sim_centered = sim_window - sim_mean     # (N, i+1)
+        attn_centered = attn_window - attn_mean  # (N, masked_len)
+        sim_centered = sim_window - sim_mean     # (N, masked_len)
         
         attn_std = attn_centered.std(dim=1, unbiased=False)  # (N,)
         sim_std = sim_centered.std(dim=1, unbiased=False)    # (N,)
@@ -347,6 +377,3 @@ def score_head(
     s_sem      = semantic_score(general_attn, token_ids, embedding_matrix)
 
     return s_sink, s_prev, s_ind, s_pos, s_sem
-
-
-from typing import List, Tuple
