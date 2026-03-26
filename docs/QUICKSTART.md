@@ -225,6 +225,7 @@ modal token set --token-id YOUR_TOKEN_ID --token-secret YOUR_TOKEN_SECRET
 ## Next Steps
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) for codebase overview
+- Read [METHODOLOGY.md](METHODOLOGY.md) for the formal experimental and mathematical specification
 - See [CONTRIBUTING.md](../CONTRIBUTING.md) for development guidelines
 - Check [README.md](../README.md) for full documentation
 - Explore the test suite in `tests/` for usage examples

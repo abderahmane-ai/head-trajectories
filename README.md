@@ -219,6 +219,12 @@ If you use this codebase in your research, please cite:
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
+## Documentation
+
+- [docs/QUICKSTART.md](docs/QUICKSTART.md) — setup and execution
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — codebase structure
+- [docs/METHODOLOGY.md](docs/METHODOLOGY.md) — formal experimental and mathematical specification
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
