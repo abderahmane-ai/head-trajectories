@@ -58,6 +58,7 @@ checkpoints/
 *.pth
 *.ckpt
 probe/probe_dataset.pt
+pilot_artifacts/
 
 # Results and figures
 results/
@@ -80,6 +81,7 @@ Thumbs.db
 *.bak
 *.swp
 *~
+.codex_tmp/
 
 # HuggingFace cache
 .cache/
