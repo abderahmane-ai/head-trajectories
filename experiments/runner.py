@@ -17,10 +17,20 @@ import torch.nn as nn
 from analysis import (
     compute_global_curves,
     compute_head_trajectories,
+    compute_induction_count_curve,
     compute_per_layer_curves,
+    compute_sink_persistence,
     compute_specialization_onset,
+    compute_stability_histogram,
+    compute_type_change_matrix,
+    compute_per_type_stability,
+    compute_discontinuity_score,
+    detect_val_loss_inflection,
+    extract_val_loss_curve,
+    find_crossing_steps,
     find_interesting_trajectories,
     load_run_results,
+    run_threshold_sensitivity,
 )
 from data import (
     OpenWebTextStream,
@@ -39,7 +49,15 @@ from model import ModelConfig, TransformerLM
 from probing.pipeline import run_probing_pipeline
 from training import Trainer, save_checkpoint
 from training.scheduler import CosineScheduler
-from visualization.timeline_plot import plot_timeline
+from visualization import (
+    plot_discontinuity_comparison,
+    plot_dominant_type_heatmap,
+    plot_individual_trajectories,
+    plot_phase_transition,
+    plot_specialization_fraction_heatmap,
+    plot_stability_figure,
+    plot_timeline,
+)
 
 
 @dataclass(frozen=True)
@@ -721,7 +739,7 @@ def analyze_single_run(
     seed: int,
     artifact_root: Path | str = Path("artifacts"),
 ) -> Dict[str, object]:
-    """Compute single-run summary metrics and save a timeline figure."""
+    """Compute full single-run analysis outputs and save the figure bundle."""
 
     profile_obj = get_profile(profile) if isinstance(profile, str) else profile
     paths = resolve_artifacts(profile_obj, seed, artifact_root)
@@ -733,17 +751,90 @@ def analyze_single_run(
         threshold_frac=0.05,
         exclude_positional_init=True,
     )
+    per_layer_curves = compute_per_layer_curves([results])
     trajectories = compute_head_trajectories(results)
     interesting = find_interesting_trajectories(trajectories, min_type_changes=2)
+    change_matrix = compute_type_change_matrix([results])
+    sink_persistence = compute_sink_persistence([results])
+    hist_data = compute_stability_histogram(change_matrix)
+    per_type_stability = compute_per_type_stability([results], change_matrix)
+    induction_curve = compute_induction_count_curve([results])
+    val_loss_curve = extract_val_loss_curve([results], ckpt_dir=paths.ckpt_dir)
+    crossing_steps = find_crossing_steps(induction_curve, fractions=[0.10, 0.25, 0.50])
+    discontinuity = compute_discontinuity_score(induction_curve)
+    inflection_10 = (
+        detect_val_loss_inflection(val_loss_curve, crossing_steps[0.10], window_steps=500)
+        if crossing_steps[0.10] is not None
+        else {
+            "inflection_found": False,
+            "inflection_step": None,
+            "crossing_step": -1,
+            "delta_steps": None,
+            "second_deriv": None,
+        }
+    )
+    inflection_25 = (
+        detect_val_loss_inflection(val_loss_curve, crossing_steps[0.25], window_steps=500)
+        if crossing_steps[0.25] is not None
+        else {
+            "inflection_found": False,
+            "inflection_step": None,
+            "crossing_step": -1,
+            "delta_steps": None,
+            "second_deriv": None,
+        }
+    )
+    threshold_sensitivity = run_threshold_sensitivity([results], scale_factors=[0.8, 1.0, 1.2])
+
+    timeline_path = paths.figures_dir / f"timeline_seed{seed}.png"
+    dominant_heatmap_path = paths.figures_dir / f"dominant_type_heatmap_seed{seed}.png"
+    specialization_heatmap_path = paths.figures_dir / f"specialization_heatmap_seed{seed}.png"
+    stability_path = paths.figures_dir / f"stability_seed{seed}.png"
+    trajectories_path = paths.figures_dir / f"trajectories_seed{seed}.png"
+    phase_path = paths.figures_dir / f"phase_transition_seed{seed}.png"
+    discontinuity_path = paths.figures_dir / f"discontinuity_zoom_seed{seed}.png"
 
     plot_timeline(
         global_curves,
-        paths.figure_path,
+        timeline_path,
         onset_steps=learned_onset_steps,
         log_x=True,
         show_undiff=True,
         title=f"Head Trajectories — {profile_obj.name} / seed {seed}",
     )
+    plot_dominant_type_heatmap(
+        per_layer_curves,
+        dominant_heatmap_path,
+        title=f"Dominant Head Type — {profile_obj.name} / seed {seed}",
+    )
+    plot_specialization_fraction_heatmap(
+        per_layer_curves,
+        specialization_heatmap_path,
+        title=f"Specialization Fraction — {profile_obj.name} / seed {seed}",
+    )
+    plot_stability_figure(
+        hist_data,
+        sink_persistence,
+        per_type_stability,
+        stability_path,
+        title=f"Stability Analysis — {profile_obj.name} / seed {seed}",
+    )
+    plot_individual_trajectories(
+        interesting,
+        results["step_index"],
+        trajectories_path,
+        max_heads=16,
+        title=f"Individual Trajectories — {profile_obj.name} / seed {seed}",
+    )
+    plot_phase_transition(
+        induction_curve,
+        val_loss_curve,
+        crossing_steps,
+        inflection_result=inflection_25,
+        output_path=phase_path,
+        title=f"Induction Emergence vs Val Loss — {profile_obj.name} / seed {seed}",
+    )
+    plot_discontinuity_comparison(induction_curve, discontinuity_path)
 
     final_fractions = {
         head_type: float(global_curves["mean"][-1, idx])
@@ -756,6 +847,17 @@ def analyze_single_run(
         "onset_steps": onset_steps,
         "learned_onset_steps": learned_onset_steps,
         "final_fractions": final_fractions,
+        "crossing_steps": {
+            f"{int(frac * 100)}pct": step
+            for frac, step in crossing_steps.items()
+        },
+        "discontinuity_score": float(discontinuity),
+        "threshold_sensitivity": threshold_sensitivity["robustness_summary"],
+        "sink_persistence": {
+            "mean_persistence": float(sink_persistence["mean_persistence"]),
+            "std_persistence": float(sink_persistence["std_persistence"]),
+            "n_ever_sink": int(sink_persistence["n_ever_sink"]),
+        },
         "interesting_trajectories": [
             {
                 "layer": int(layer),
@@ -768,7 +870,15 @@ def analyze_single_run(
             for (layer, head), traj in interesting.items()
         ][:16],
         "results_path": str(paths.results_path),
-        "timeline_figure": str(paths.figure_path),
+        "figures": {
+            "timeline": str(timeline_path),
+            "dominant_type_heatmap": str(dominant_heatmap_path),
+            "specialization_heatmap": str(specialization_heatmap_path),
+            "stability": str(stability_path),
+            "trajectories": str(trajectories_path),
+            "phase_transition": str(phase_path),
+            "discontinuity_zoom": str(discontinuity_path),
+        },
     }
     _write_json(paths.summary_path, summary)
     return summary
