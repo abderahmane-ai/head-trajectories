@@ -23,8 +23,8 @@
 ### Threshold Calibration
 Random-baseline thresholds computed over 3 random seeds:
 - **Raw pilot thresholds:** `[0.028, 0.0039, 0.0096, 0.000, -0.036]`
-- **Sanitized pilot thresholds:** `[0.04, 0.01, 0.03, 0.05, 0.05]`
-*(Values below safe lower bounds were clamped to avoid division-by-zero or extreme sensitivity in the classifier.)*
+
+*(Note: The original pilot used manual threshold clamping, which has since been removed. Current methodology uses raw calibrated thresholds directly, aligning with the main codebase.)*
 
 ### Training Dynamics
 The model learned smoothly over 12,000 steps:
