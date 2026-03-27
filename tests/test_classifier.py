@@ -6,10 +6,10 @@ import pytest
 import torch
 import numpy as np
 from pathlib import Path
-import tempfile
 from probing.classifier import (
     classify_head,
     HeadClassifier,
+    prepare_thresholds,
     HEAD_TYPES,
     THRESHOLDS,
     LABEL_UNDIFF,
@@ -70,165 +70,232 @@ class TestClassifyHead:
         # Negative semantic should not win
         assert label != LABEL_SEM, "Negative semantic should not win"
 
+    def test_nonpositive_thresholds_do_not_crash(self):
+        """Non-positive thresholds should be sanitized for normalization only."""
+        scores = (0.4, 0.2, 0.1, 0.3, 0.1)
+        thresholds = np.array([0.0, 0.5, -0.1, 0.7, 0.3], dtype=np.float32)
+        label, is_tie = classify_head(scores, thresholds=thresholds)
+        assert label == LABEL_SINK
+        assert not is_tie
+
+    def test_nonfinite_thresholds_raise(self):
+        """NaN/Inf thresholds should be rejected immediately."""
+        scores = (0.4, 0.2, 0.1, 0.3, 0.1)
+        with pytest.raises(ValueError):
+            classify_head(scores, thresholds=np.array([0.4, np.nan, 0.3, 0.7, 0.3], dtype=np.float32))
+        with pytest.raises(ValueError):
+            classify_head(scores, thresholds=np.array([0.4, np.inf, 0.3, 0.7, 0.3], dtype=np.float32))
+
+
+class TestPrepareThresholds:
+    """Test threshold validation and sanitization."""
+
+    def test_positive_thresholds_passthrough(self):
+        thresholds = np.array([0.4, 0.5, 0.3, 0.7, 0.3], dtype=np.float32)
+        raw, effective, mask, sanitized = prepare_thresholds(thresholds)
+        assert np.allclose(raw, thresholds)
+        assert np.allclose(effective, thresholds)
+        assert not sanitized
+        assert not mask.any()
+
+    def test_nonpositive_thresholds_are_sanitized(self):
+        thresholds = np.array([0.4, 0.0, -0.3, 0.7, 0.3], dtype=np.float32)
+        raw, effective, mask, sanitized = prepare_thresholds(thresholds)
+        assert np.allclose(raw, thresholds)
+        assert sanitized
+        assert mask.tolist() == [False, True, True, False, False]
+        assert effective[1] > 0.0
+        assert effective[2] > 0.0
+
+    def test_nonfinite_thresholds_raise(self):
+        with pytest.raises(ValueError):
+            prepare_thresholds(np.array([0.4, np.nan, 0.3, 0.7, 0.3], dtype=np.float32))
+        with pytest.raises(ValueError):
+            prepare_thresholds(np.array([0.4, 0.5, 0.3, np.inf, 0.3], dtype=np.float32))
+
 
 class TestHeadClassifier:
     """Test the HeadClassifier class."""
     
-    def test_initialization(self):
+    def test_initialization(self, workspace_tmpdir):
         """Test classifier initialization."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ties_path = Path(tmpdir) / "ties.csv"
-            
-            classifier = HeadClassifier(
-                n_checkpoints=10,
-                n_layers=4,
-                n_heads=8,
-                seed=42,
-                ties_log_path=ties_path,
-            )
-            
-            assert classifier.label_tensor.shape == (10, 4, 8)
-            assert classifier.score_tensor.shape == (10, 4, 8, 5)
-            assert len(classifier.step_index) == 0
+        ties_path = workspace_tmpdir / "ties.csv"
+        
+        classifier = HeadClassifier(
+            n_checkpoints=10,
+            n_layers=4,
+            n_heads=8,
+            seed=42,
+            ties_log_path=ties_path,
+        )
+        
+        assert classifier.label_tensor.shape == (10, 4, 8)
+        assert classifier.score_tensor.shape == (10, 4, 8, 5)
+        assert len(classifier.step_index) == 0
     
-    def test_record_and_classify(self):
+    def test_record_and_classify(self, workspace_tmpdir):
         """Test recording scores and classification."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ties_path = Path(tmpdir) / "ties.csv"
-            
-            classifier = HeadClassifier(
-                n_checkpoints=5,
-                n_layers=2,
-                n_heads=4,
-                seed=42,
-                ties_log_path=ties_path,
-            )
-            
-            classifier.register_step(0)
-            
-            # Record a clear sink head
-            scores = (0.9, 0.2, 0.1, 0.3, 0.1)
-            label = classifier.record(
-                ckpt_idx=0,
-                step=0,
-                layer=0,
-                head=0,
-                scores=scores,
-            )
-            
-            assert label == LABEL_SINK
-            assert classifier.label_tensor[0, 0, 0] == LABEL_SINK
-            assert torch.allclose(
-                classifier.score_tensor[0, 0, 0],
-                torch.tensor(scores, dtype=torch.float32),
-            )
+        ties_path = workspace_tmpdir / "ties.csv"
+        
+        classifier = HeadClassifier(
+            n_checkpoints=5,
+            n_layers=2,
+            n_heads=4,
+            seed=42,
+            ties_log_path=ties_path,
+        )
+        
+        classifier.register_step(0)
+        
+        # Record a clear sink head
+        scores = (0.9, 0.2, 0.1, 0.3, 0.1)
+        label = classifier.record(
+            ckpt_idx=0,
+            step=0,
+            layer=0,
+            head=0,
+            scores=scores,
+        )
+        
+        assert label == LABEL_SINK
+        assert classifier.label_tensor[0, 0, 0] == LABEL_SINK
+        assert torch.allclose(
+            classifier.score_tensor[0, 0, 0],
+            torch.tensor(scores, dtype=torch.float32),
+        )
     
-    def test_tie_logging(self):
+    def test_tie_logging(self, workspace_tmpdir):
         """Test that ties are logged correctly."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ties_path = Path(tmpdir) / "ties.csv"
-            
-            classifier = HeadClassifier(
-                n_checkpoints=5,
-                n_layers=2,
-                n_heads=4,
-                seed=42,
-                ties_log_path=ties_path,
-                tie_tolerance=0.05,
-            )
-            
-            classifier.register_step(100)
-            
-            # Record a tie
-            scores = (0.42, 0.52, 0.1, 0.3, 0.1)
-            label = classifier.record(
-                ckpt_idx=0,
-                step=100,
-                layer=1,
-                head=2,
-                scores=scores,
-            )
-            
-            assert label == LABEL_UNDIFF
-            assert len(classifier._ties) == 1
-            
-            # Flush and check file
-            classifier.flush_ties()
-            assert ties_path.exists()
-            
-            # Read and verify
-            with open(ties_path) as f:
-                lines = f.readlines()
-                assert len(lines) == 2  # Header + 1 tie
-                assert "run_seed" in lines[0]
-                assert "42" in lines[1]
-                assert "100" in lines[1]
+        ties_path = workspace_tmpdir / "ties.csv"
+        
+        classifier = HeadClassifier(
+            n_checkpoints=5,
+            n_layers=2,
+            n_heads=4,
+            seed=42,
+            ties_log_path=ties_path,
+            tie_tolerance=0.05,
+        )
+        
+        classifier.register_step(100)
+        
+        # Record a tie
+        scores = (0.42, 0.52, 0.1, 0.3, 0.1)
+        label = classifier.record(
+            ckpt_idx=0,
+            step=100,
+            layer=1,
+            head=2,
+            scores=scores,
+        )
+        
+        assert label == LABEL_UNDIFF
+        assert len(classifier._ties) == 1
+        
+        # Flush and check file
+        classifier.flush_ties()
+        assert ties_path.exists()
+        
+        # Read and verify
+        with open(ties_path) as f:
+            lines = f.readlines()
+            assert len(lines) == 2  # Header + 1 tie
+            assert "run_seed" in lines[0]
+            assert "42" in lines[1]
+            assert "100" in lines[1]
     
-    def test_save_and_load(self):
+    def test_save_and_load(self, workspace_tmpdir):
         """Test saving and loading classifier state."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ties_path = Path(tmpdir) / "ties.csv"
-            output_path = Path(tmpdir) / "results.pt"
-            
-            # Create and populate classifier
-            classifier = HeadClassifier(
-                n_checkpoints=3,
-                n_layers=2,
-                n_heads=4,
-                seed=42,
-                ties_log_path=ties_path,
-            )
-            
-            for ckpt in range(3):
-                classifier.register_step(ckpt * 100)
-                for layer in range(2):
-                    for head in range(4):
-                        scores = (
-                            0.5 + 0.1 * head,
-                            0.3,
-                            0.2,
-                            0.4,
-                            0.1,
-                        )
-                        classifier.record(ckpt, ckpt * 100, layer, head, scores)
-            
-            # Save
-            classifier.save(output_path)
-            assert output_path.exists()
-            
-            # Load
-            loaded = HeadClassifier.load(output_path)
-            
-            assert loaded["seed"] == 42
-            assert loaded["n_layers"] == 2
-            assert loaded["n_heads"] == 4
-            assert len(loaded["step_index"]) == 3
-            assert loaded["label_tensor"].shape == (3, 2, 4)
-            assert loaded["score_tensor"].shape == (3, 2, 4, 5)
+        ties_path = workspace_tmpdir / "ties.csv"
+        output_path = workspace_tmpdir / "results.pt"
+        
+        # Create and populate classifier
+        classifier = HeadClassifier(
+            n_checkpoints=3,
+            n_layers=2,
+            n_heads=4,
+            seed=42,
+            ties_log_path=ties_path,
+        )
+        
+        for ckpt in range(3):
+            classifier.register_step(ckpt * 100)
+            for layer in range(2):
+                for head in range(4):
+                    scores = (
+                        0.5 + 0.1 * head,
+                        0.3,
+                        0.2,
+                        0.4,
+                        0.1,
+                    )
+                    classifier.record(ckpt, ckpt * 100, layer, head, scores)
+        
+        # Save
+        classifier.save(output_path)
+        assert output_path.exists()
+        
+        # Load
+        loaded = HeadClassifier.load(output_path)
+        
+        assert loaded["seed"] == 42
+        assert loaded["n_layers"] == 2
+        assert loaded["n_heads"] == 4
+        assert len(loaded["step_index"]) == 3
+        assert loaded["label_tensor"].shape == (3, 2, 4)
+        assert loaded["score_tensor"].shape == (3, 2, 4, 5)
+        assert "raw_thresholds" in loaded
+        assert "effective_thresholds" in loaded
+        assert "thresholds_sanitized" in loaded
     
-    def test_custom_thresholds(self):
+    def test_custom_thresholds(self, workspace_tmpdir):
         """Test classifier with custom thresholds."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ties_path = Path(tmpdir) / "ties.csv"
-            custom_thresholds = np.array([0.3, 0.4, 0.2, 0.6, 0.2])
-            
-            classifier = HeadClassifier(
-                n_checkpoints=2,
-                n_layers=1,
-                n_heads=2,
-                seed=42,
-                ties_log_path=ties_path,
-                thresholds=custom_thresholds,
-            )
-            
-            assert np.allclose(classifier.thresholds, custom_thresholds)
-            
-            classifier.register_step(0)
-            scores = (0.35, 0.2, 0.1, 0.3, 0.1)
-            label = classifier.record(0, 0, 0, 0, scores)
-            
-            # With custom thresholds, 0.35 > 0.3 so should be SINK
-            assert label == LABEL_SINK
+        ties_path = workspace_tmpdir / "ties.csv"
+        custom_thresholds = np.array([0.3, 0.4, 0.2, 0.6, 0.2])
+        
+        classifier = HeadClassifier(
+            n_checkpoints=2,
+            n_layers=1,
+            n_heads=2,
+            seed=42,
+            ties_log_path=ties_path,
+            thresholds=custom_thresholds,
+        )
+        
+        assert np.allclose(classifier.raw_thresholds, custom_thresholds)
+        assert np.allclose(classifier.effective_thresholds, custom_thresholds)
+        
+        classifier.register_step(0)
+        scores = (0.35, 0.2, 0.1, 0.3, 0.1)
+        label = classifier.record(0, 0, 0, 0, scores)
+        
+        # With custom thresholds, 0.35 > 0.3 so should be SINK
+        assert label == LABEL_SINK
+
+    def test_threshold_sanitization_is_persisted(self, workspace_tmpdir):
+        """Sanitized thresholds should be saved with both raw and effective values."""
+        ties_path = workspace_tmpdir / "ties.csv"
+        output_path = workspace_tmpdir / "results.pt"
+        thresholds = np.array([0.4, 0.0, 0.3, -0.2, 0.3], dtype=np.float32)
+
+        classifier = HeadClassifier(
+            n_checkpoints=1,
+            n_layers=1,
+            n_heads=1,
+            seed=42,
+            ties_log_path=ties_path,
+            thresholds=thresholds,
+        )
+        classifier.register_step(0)
+        classifier.record(0, 0, 0, 0, (0.5, 0.1, 0.1, 0.2, 0.1))
+        classifier.save(output_path)
+
+        loaded = HeadClassifier.load(output_path)
+        assert loaded["thresholds_sanitized"] is True
+        assert loaded["raw_thresholds"][1] == pytest.approx(0.0)
+        assert loaded["raw_thresholds"][3] == pytest.approx(-0.2)
+        assert loaded["effective_thresholds"][1] > 0.0
+        assert loaded["effective_thresholds"][3] > 0.0
 
 
 class TestHeadTypes:

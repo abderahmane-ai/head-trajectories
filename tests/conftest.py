@@ -2,6 +2,10 @@
 Pytest configuration and shared fixtures.
 """
 
+import shutil
+import uuid
+from pathlib import Path
+
 import pytest
 import torch
 import numpy as np
@@ -68,3 +72,16 @@ def fake_result():
         }
     
     return _make_result
+
+
+@pytest.fixture
+def workspace_tmpdir():
+    """Create a repo-local temporary directory for filesystem tests."""
+    root = Path(__file__).resolve().parent.parent / ".codex_tmp" / "pytest"
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / str(uuid.uuid4())
+    path.mkdir()
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)

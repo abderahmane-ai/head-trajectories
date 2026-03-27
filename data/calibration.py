@@ -2,8 +2,9 @@
 data/calibration.py — Random-baseline calibration for head type thresholds.
 
 Computes per-score thresholds by measuring head scores on a randomly
-initialized model with attention maps shuffled along the sequence dimension.
-Thresholds are set to mean + 2*std across all heads for each score.
+initialized model with causally valid attention maps whose key positions
+have been scrambled within each query row. Thresholds are set to mean + 2*std
+across all heads for each score.
 """
 
 import random
@@ -76,13 +77,52 @@ def _shuffle_attention_rows(
     return shuffled
 
 
+def _scramble_causal_attention_keys(
+    attn_maps: List[torch.Tensor],
+    generator: torch.Generator,
+) -> List[torch.Tensor]:
+    """
+    Scramble key positions independently within each valid causal row.
+
+    Unlike row shuffling, this destroys fixed-key anchoring, previous-token
+    structure, induction targets, semantic alignment, and positional
+    comparability while preserving:
+      - causal support (no future-token mass is introduced)
+      - row-stochasticity (each row still sums to 1)
+    """
+
+    scrambled: List[torch.Tensor] = []
+
+    for layer_map in attn_maps:
+        # layer_map: (N, H, T, T)
+        N, H, T, _ = layer_map.shape
+        out = torch.zeros_like(layer_map)
+
+        for n in range(N):
+            for h in range(H):
+                for t in range(T):
+                    valid = layer_map[n, h, t, : t + 1]
+                    perm = torch.randperm(
+                        t + 1,
+                        generator=generator,
+                        device=layer_map.device,
+                    )
+                    out[n, h, t, : t + 1] = valid[perm]
+
+        # Re-normalize defensively to preserve exact row-stochasticity.
+        row_sums = out.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+        scrambled.append(out / row_sums)
+
+    return scrambled
+
+
 def _calibrate_thresholds_single(
     probe_dict: Dict[str, torch.Tensor],
     config: ModelConfig,
     device: torch.device,
     seed: int,
     batch_size: int,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -107,9 +147,9 @@ def _calibrate_thresholds_single(
     positional_maps = _extract_attention_maps(model, positional_seqs, device, batch_size)
 
     generator = torch.Generator().manual_seed(seed + 1)
-    general_maps = _shuffle_attention_rows(general_maps, generator)
-    induction_maps = _shuffle_attention_rows(induction_maps, generator)
-    positional_maps = _shuffle_attention_rows(positional_maps, generator)
+    general_maps = _scramble_causal_attention_keys(general_maps, generator)
+    induction_maps = _scramble_causal_attention_keys(induction_maps, generator)
+    positional_maps = _scramble_causal_attention_keys(positional_maps, generator)
 
     induction_p1 = probe_dict["induction_p1"]
     induction_p2 = probe_dict["induction_p2"]
@@ -142,7 +182,12 @@ def _calibrate_thresholds_single(
     stds = scores_arr.std(axis=0)
     thresholds = means + 2.0 * stds
 
-    return thresholds.astype(np.float32)
+    return (
+        thresholds.astype(np.float32),
+        means.astype(np.float32),
+        stds.astype(np.float32),
+        (thresholds <= 0.0).astype(np.bool_),
+    )
 
 
 def calibrate_thresholds(
@@ -152,7 +197,8 @@ def calibrate_thresholds(
     batch_size: int = 16,
     seeds: Optional[List[int]] = None,
     n_seeds: int = 3,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    return_diagnostics: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray] | Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray | bool]]:
     """
     Compute random-baseline thresholds for the five head-type scores across
     multiple random seeds to assess stability.
@@ -167,8 +213,11 @@ def calibrate_thresholds(
         seeds = [base_seed + i for i in range(n_seeds)]
 
     thresholds_per_seed: List[np.ndarray] = []
+    means_per_seed: List[np.ndarray] = []
+    stds_per_seed: List[np.ndarray] = []
+    nonpositive_mask_per_seed: List[np.ndarray] = []
     for seed in seeds:
-        thresholds = _calibrate_thresholds_single(
+        thresholds, means, stds, nonpositive_mask = _calibrate_thresholds_single(
             probe_dict=probe_dict,
             config=config,
             device=device,
@@ -176,9 +225,26 @@ def calibrate_thresholds(
             batch_size=batch_size,
         )
         thresholds_per_seed.append(thresholds)
+        means_per_seed.append(means)
+        stds_per_seed.append(stds)
+        nonpositive_mask_per_seed.append(nonpositive_mask)
 
     per_seed_arr = np.stack(thresholds_per_seed, axis=0).astype(np.float32)
+    per_seed_means = np.stack(means_per_seed, axis=0).astype(np.float32)
+    per_seed_stds = np.stack(stds_per_seed, axis=0).astype(np.float32)
+    per_seed_nonpositive = np.stack(nonpositive_mask_per_seed, axis=0).astype(bool)
     mean = per_seed_arr.mean(axis=0)
     std = per_seed_arr.std(axis=0)
 
-    return mean.astype(np.float32), std.astype(np.float32), per_seed_arr
+    if not return_diagnostics:
+        return mean.astype(np.float32), std.astype(np.float32), per_seed_arr
+
+    diagnostics: Dict[str, np.ndarray | bool] = {
+        "per_seed_metric_means": per_seed_means,
+        "per_seed_metric_stds": per_seed_stds,
+        "per_seed_nonpositive_mask": per_seed_nonpositive,
+        "mean_threshold_nonpositive_mask": (mean <= 0.0),
+        "requires_sanitization": bool((per_seed_nonpositive.any()) or (mean <= 0.0).any()),
+    }
+
+    return mean.astype(np.float32), std.astype(np.float32), per_seed_arr, diagnostics

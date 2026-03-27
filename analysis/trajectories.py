@@ -229,6 +229,7 @@ def find_interesting_trajectories(
 def compute_specialization_onset(
     global_curves: Dict[str, np.ndarray],
     threshold_frac: float = 0.05,
+    exclude_positional_init: bool = False,
 ) -> Dict[str, Optional[int]]:
     """
     For each head type, find the first training step at which its global
@@ -260,6 +261,13 @@ def compute_specialization_onset(
 
         fracs = mean_fracs[:, t_idx]
         above = np.where(fracs >= threshold_frac)[0]
+        if (
+            exclude_positional_init and
+            type_name == "POSITIONAL" and
+            len(above) > 0 and
+            int(steps[above[0]]) == int(steps[0])
+        ):
+            above = above[1:]
 
         if len(above) == 0:
             onset_steps[type_name] = None
@@ -274,6 +282,7 @@ def print_trajectory_report(
     per_layer_curves: Dict[str, object],
     onset_steps:     Dict[str, Optional[int]],
     seed:            int,
+    learned_onset_steps: Optional[Dict[str, Optional[int]]] = None,
 ) -> None:
     """Print a formatted summary of trajectory analysis results."""
 
@@ -296,6 +305,17 @@ def print_trajectory_report(
     for type_name, step in sorted_types:
         step_str = f"{step:>10,}" if step is not None else "      never"
         print(f"  {type_name:<20}: {step_str}")
+
+    if learned_onset_steps is not None:
+        print(f"\n  Learned onset (excluding architectural POSITIONAL at step 0):")
+        print(f"  {'─' * 50}")
+        sorted_learned = sorted(
+            [(k, v) for k, v in learned_onset_steps.items() if k != "UNDIFFERENTIATED"],
+            key=lambda x: (x[1] is None, x[1] or 0)
+        )
+        for type_name, step in sorted_learned:
+            step_str = f"{step:>10,}" if step is not None else "      never"
+            print(f"  {type_name:<20}: {step_str}")
 
     print(f"\n  Final checkpoint fractions (mean ± std across seeds):")
     print(f"  {'─' * 50}")

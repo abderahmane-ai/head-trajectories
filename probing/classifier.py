@@ -15,6 +15,7 @@ Head type labels:
 """
 
 import csv
+import warnings
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -50,6 +51,7 @@ THRESHOLDS: np.ndarray = np.array([0.4, 0.5, 0.3, 0.7, 0.3], dtype=np.float32)
 # Tie-breaking tolerance — if top two normalized scores are within this,
 # assign UNDIFFERENTIATED and log the tie
 TIE_TOLERANCE: float = 0.05
+THRESHOLD_EPSILON: float = 1e-6
 
 LABEL_UNDIFF: int = 0
 LABEL_SINK:   int = 1
@@ -62,6 +64,44 @@ LABEL_SEM:    int = 5
 # ─────────────────────────────────────────────────────────────────────────────
 # Single head classification
 # ─────────────────────────────────────────────────────────────────────────────
+
+def prepare_thresholds(
+    thresholds: np.ndarray | torch.Tensor | None,
+    epsilon: float = THRESHOLD_EPSILON,
+    warn: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
+    """
+    Validate raw thresholds and derive effective thresholds for normalization.
+
+    Returns:
+        (raw_thresholds, effective_thresholds, sanitization_mask, was_sanitized)
+    """
+
+    if thresholds is None:
+        thresholds = THRESHOLDS
+    if isinstance(thresholds, torch.Tensor):
+        thresholds = thresholds.detach().cpu().numpy()
+
+    raw = np.asarray(thresholds, dtype=np.float32)
+    if raw.shape != (5,):
+        raise ValueError(f"thresholds must be shape (5,), got {raw.shape}")
+    if not np.all(np.isfinite(raw)):
+        raise ValueError(f"thresholds must be finite, got {raw.tolist()}")
+
+    effective = raw.copy()
+    sanitization_mask = effective <= 0.0
+    was_sanitized = bool(sanitization_mask.any())
+    if was_sanitized:
+        effective[sanitization_mask] = epsilon
+        if warn:
+            warnings.warn(
+                "Non-positive thresholds detected; using epsilon floor for "
+                f"safe normalization at indices {np.where(sanitization_mask)[0].tolist()}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+    return raw, effective, sanitization_mask, was_sanitized
 
 def classify_head(
     scores:           Tuple[float, float, float, float, float],
@@ -94,13 +134,14 @@ def classify_head(
     """
 
     score_arr = np.array(scores, dtype=np.float32)
-    if isinstance(thresholds, torch.Tensor):
-        thresholds = thresholds.detach().cpu().numpy()
-    thresholds = np.asarray(thresholds, dtype=np.float32)
-    normalized = score_arr / thresholds   # element-wise division
+    raw_thresholds, effective_thresholds, _, _ = prepare_thresholds(
+        thresholds,
+        warn=False,
+    )
+    normalized = score_arr / effective_thresholds   # element-wise division
 
     # Check if all raw scores are below their respective thresholds
-    if np.all(score_arr < thresholds):
+    if np.all(score_arr < raw_thresholds):
         return LABEL_UNDIFF, False
 
     # Sort normalized scores descending to check for ties
@@ -144,16 +185,13 @@ class HeadClassifier:
         self.n_heads       = n_heads
         self.seed          = seed
         self.ties_log_path = ties_log_path
-        if thresholds is None:
-            thresholds = THRESHOLDS
-        if isinstance(thresholds, torch.Tensor):
-            thresholds = thresholds.detach().cpu().numpy()
-        thresholds = np.asarray(thresholds, dtype=np.float32)
-        if thresholds.shape != (5,):
-            raise ValueError(
-                f"thresholds must be shape (5,), got {thresholds.shape}"
-            )
-        self.thresholds    = thresholds
+        (
+            self.raw_thresholds,
+            self.effective_thresholds,
+            self.threshold_sanitization_mask,
+            self.thresholds_sanitized,
+        ) = prepare_thresholds(thresholds, warn=True)
+        self.thresholds = self.effective_thresholds
         self.tie_tolerance = tie_tolerance
 
         # Pre-allocate tensors
@@ -190,7 +228,11 @@ class HeadClassifier:
             label: integer head type label
         """
 
-        label, is_tie = classify_head(scores, self.thresholds, self.tie_tolerance)
+        label, is_tie = classify_head(
+            scores,
+            self.raw_thresholds,
+            self.tie_tolerance,
+        )
 
         self.score_tensor[ckpt_idx, layer, head] = torch.tensor(
             scores, dtype=torch.float32
@@ -199,7 +241,7 @@ class HeadClassifier:
 
         if is_tie:
             score_arr  = np.array(scores, dtype=np.float32)
-            normalized = score_arr / self.thresholds
+            normalized = score_arr / self.effective_thresholds
             top2_idx   = np.argsort(normalized)[::-1][:2]
             self._ties.append({
                 "run_seed":       self.seed,
@@ -256,7 +298,11 @@ class HeadClassifier:
                 "seed":         self.seed,
                 "n_layers":     self.n_layers,
                 "n_heads":      self.n_heads,
-                "thresholds":   self.thresholds.tolist(),
+                "thresholds":   self.effective_thresholds.tolist(),
+                "raw_thresholds": self.raw_thresholds.tolist(),
+                "effective_thresholds": self.effective_thresholds.tolist(),
+                "threshold_sanitization_mask": self.threshold_sanitization_mask.tolist(),
+                "thresholds_sanitized": self.thresholds_sanitized,
             },
             output_path,
         )
@@ -283,5 +329,14 @@ class HeadClassifier:
         missing = required - set(data.keys())
         if missing:
             raise ValueError(f"Results file missing keys: {missing}")
+
+        if "raw_thresholds" not in data and "thresholds" in data:
+            data["raw_thresholds"] = data["thresholds"]
+        if "effective_thresholds" not in data and "thresholds" in data:
+            data["effective_thresholds"] = data["thresholds"]
+        if "threshold_sanitization_mask" not in data:
+            data["threshold_sanitization_mask"] = [False] * 5
+        if "thresholds_sanitized" not in data:
+            data["thresholds_sanitized"] = False
 
         return data

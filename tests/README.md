@@ -41,6 +41,7 @@ tests/
 ├── __init__.py              # Package marker
 ├── conftest.py              # Shared fixtures
 ├── test_scores.py           # Scoring function tests (5 functions)
+├── test_calibration.py      # Calibration null + threshold smoke tests
 ├── test_classifier.py       # Classification logic tests
 ├── test_model.py            # Transformer architecture tests
 ├── test_trajectories.py     # Trajectory analysis tests
@@ -60,6 +61,7 @@ tests/
 ### probing/classifier.py
 - ✅ `classify_head` - below threshold, clear types, tie detection, custom thresholds
 - ✅ `HeadClassifier` - initialization, record/classify, tie logging, save/load, custom thresholds
+- ✅ Threshold validation - finite checks, non-positive sanitization, persistence
 - ✅ Constants - HEAD_TYPES, THRESHOLDS, label constants
 
 ### model/transformer.py
@@ -76,6 +78,11 @@ tests/
 ### Integration Tests
 - ✅ End-to-end probing workflow (extract → score → classify)
 - ✅ Full classification workflow (multiple checkpoints)
+
+### Calibration
+- ✅ New causal key-scramble null preserves causal row-stochasticity
+- ✅ Regression test showing row shuffling is invalid for the sink metric
+- ✅ Calibration smoke test for finite positive thresholds
 
 ## Fixtures
 

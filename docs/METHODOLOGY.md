@@ -422,8 +422,10 @@ For a given architecture:
 1. Initialize a **random model** with that architecture.
 2. Run the fixed probe dataset through it.
 3. Extract all attention maps.
-4. Shuffle the attention rows independently per sequence to destroy meaningful structure while preserving row-stochasticity.
+4. Scramble key positions independently within each valid causal row to destroy fixed-key anchoring and other structured patterns while preserving causal support and row-stochasticity.
 5. Score every head on all five metrics.
+
+This null matters for the sink metric in particular: row-shuffling leaves fixed-key aggregation largely unchanged, so the calibration baseline must scramble **keys within rows**, not rows themselves.
 
 If $r_{u,m}$ is the random-baseline score of head $u$ on metric $m$, define:
 
@@ -457,6 +459,9 @@ $$
 The repository repeats this calibration across several random seeds and stores:
 
 - per-seed threshold vectors
+- per-seed metric means
+- per-seed metric standard deviations
+- whether any threshold was non-positive and would require defensive sanitization at classification time
 - their empirical mean
 - their empirical standard deviation
 
@@ -483,6 +488,8 @@ define normalized scores:
 $$
 z_m = \frac{s_m}{\tau_m}.
 $$
+
+In implementation, the classifier validates thresholds before normalization. Non-finite thresholds are rejected. Non-positive thresholds are preserved as raw calibration outputs for reporting, but are replaced by a small positive floor **only for safe division**. The below-threshold check still uses the raw calibrated thresholds.
 
 The classification rule is:
 
@@ -615,20 +622,21 @@ Sinks should appear earliest. Operationally:
 
 ### H2. Ordered development
 
-Expected order:
+Expected order for the combined architectural-plus-learned story:
 
 $$
 \text{positional (architectural)} \rightarrow \text{sink} \rightarrow \text{prev\_token} \rightarrow \text{induction} \rightarrow \text{semantic}.
 $$
 
-**Note on positional onset:** Positional heads appear at step 0 due to Rotary Position Embeddings (RoPE), which create deterministic position-based attention patterns before any learning occurs. This is an architectural feature, not learned behavior. The hypothesis distinguishes:
+**Note on positional onset:** Positional heads can appear at step 0 due to Rotary Position Embeddings (RoPE), which create deterministic position-based attention patterns before any learning occurs. This is an architectural feature, not learned specialization. The hypothesis therefore distinguishes:
 - **Architectural positional**: RoPE-driven structure at initialization (step 0)
 - **Learned specialization**: Sink, prev-token, induction, and semantic behaviors that emerge during training
 
 Operationally:
 
 - compare onset ordering across type-fraction curves
-- distinguish architectural onset (step 0) from learned onset (first step where fraction exceeds threshold during training)
+- report architectural positional onset separately from learned onset
+- when comparing learned types, exclude the step-0 positional crossing from the ordering statistic
 
 ### H3. Layer stratification
 

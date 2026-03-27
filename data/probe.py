@@ -19,12 +19,20 @@ Probe dataset structure:
   heldout_induction_p2:   (20,)      int64  — heldout induction p2
   heldout_positional_seqs:(20, 256)  int64  — heldout positional sequences
   heldout_positional_pairs:(10, 2)   int64  — heldout positional pairs
-  calibrated_thresholds_15m: (5,) float32 — random-baseline thresholds (15M)
+  calibrated_thresholds_15m: (5,) float32 — mean random-baseline thresholds (15M)
   calibrated_thresholds_15m_std: (5,) float32 — across calibration seeds
   calibrated_thresholds_15m_seeds: (S, 5) float32 — per-seed thresholds
-  calibrated_thresholds_6m:  (5,) float32 — random-baseline thresholds (6M)
+  calibrated_thresholds_15m_metric_means: (S, 5) float32 — per-seed raw metric means
+  calibrated_thresholds_15m_metric_stds: (S, 5) float32 — per-seed raw metric stds
+  calibrated_thresholds_15m_nonpositive_mask: (S, 5) bool — thresholds <= 0 per seed
+  calibrated_thresholds_15m_requires_sanitization: scalar bool — any non-positive threshold seen
+  calibrated_thresholds_6m:  (5,) float32 — mean random-baseline thresholds (6M)
   calibrated_thresholds_6m_std: (5,) float32 — across calibration seeds
   calibrated_thresholds_6m_seeds: (S, 5) float32 — per-seed thresholds
+  calibrated_thresholds_6m_metric_means: (S, 5) float32 — per-seed raw metric means
+  calibrated_thresholds_6m_metric_stds: (S, 5) float32 — per-seed raw metric stds
+  calibrated_thresholds_6m_nonpositive_mask: (S, 5) bool — thresholds <= 0 per seed
+  calibrated_thresholds_6m_requires_sanitization: scalar bool — any non-positive threshold seen
   calibration_seeds:  (S,) int64  — seeds used for calibration
   creation_seed:      scalar int        — always 0
   block_size:         scalar int        — always 256
@@ -410,22 +418,36 @@ def build_probe_dataset(
 
     # Calibrate thresholds from random baseline (15M + 6M)
     print("\n  [6/6] Calibrating random-baseline thresholds...")
-    thresholds_15m, thresholds_15m_std, thresholds_15m_seeds = calibrate_thresholds(
+    (
+        thresholds_15m,
+        thresholds_15m_std,
+        thresholds_15m_seeds,
+        thresholds_15m_diag,
+    ) = calibrate_thresholds(
         probe_dict=probe_dict,
         config=ModelConfig.small_15m(),
         device=torch.device("cpu"),
         n_seeds=n_calibration_seeds,
+        return_diagnostics=True,
     )
-    thresholds_6m, thresholds_6m_std, thresholds_6m_seeds = calibrate_thresholds(
+    (
+        thresholds_6m,
+        thresholds_6m_std,
+        thresholds_6m_seeds,
+        thresholds_6m_diag,
+    ) = calibrate_thresholds(
         probe_dict=probe_dict,
         config=ModelConfig.ablation_6m(),
         device=torch.device("cpu"),
         n_seeds=n_calibration_seeds,
+        return_diagnostics=True,
     )
     print(f"  15M thresholds mean : {thresholds_15m.tolist()}")
     print(f"  15M thresholds std  : {thresholds_15m_std.tolist()}")
+    print(f"  15M requires sanitization: {thresholds_15m_diag['requires_sanitization']}")
     print(f"  6M thresholds mean  : {thresholds_6m.tolist()}")
     print(f"  6M thresholds std   : {thresholds_6m_std.tolist()}")
+    print(f"  6M requires sanitization : {thresholds_6m_diag['requires_sanitization']}")
     calibration_seeds = torch.tensor(
         [seed + i for i in range(n_calibration_seeds)], dtype=torch.long
     )
@@ -438,6 +460,18 @@ def build_probe_dataset(
     probe_dict["calibrated_thresholds_15m_seeds"] = torch.tensor(
         thresholds_15m_seeds, dtype=torch.float32
     )
+    probe_dict["calibrated_thresholds_15m_metric_means"] = torch.tensor(
+        thresholds_15m_diag["per_seed_metric_means"], dtype=torch.float32
+    )
+    probe_dict["calibrated_thresholds_15m_metric_stds"] = torch.tensor(
+        thresholds_15m_diag["per_seed_metric_stds"], dtype=torch.float32
+    )
+    probe_dict["calibrated_thresholds_15m_nonpositive_mask"] = torch.tensor(
+        thresholds_15m_diag["per_seed_nonpositive_mask"], dtype=torch.bool
+    )
+    probe_dict["calibrated_thresholds_15m_requires_sanitization"] = torch.tensor(
+        thresholds_15m_diag["requires_sanitization"], dtype=torch.bool
+    )
     probe_dict["calibrated_thresholds_6m"] = torch.tensor(
         thresholds_6m, dtype=torch.float32
     )
@@ -446,6 +480,18 @@ def build_probe_dataset(
     )
     probe_dict["calibrated_thresholds_6m_seeds"] = torch.tensor(
         thresholds_6m_seeds, dtype=torch.float32
+    )
+    probe_dict["calibrated_thresholds_6m_metric_means"] = torch.tensor(
+        thresholds_6m_diag["per_seed_metric_means"], dtype=torch.float32
+    )
+    probe_dict["calibrated_thresholds_6m_metric_stds"] = torch.tensor(
+        thresholds_6m_diag["per_seed_metric_stds"], dtype=torch.float32
+    )
+    probe_dict["calibrated_thresholds_6m_nonpositive_mask"] = torch.tensor(
+        thresholds_6m_diag["per_seed_nonpositive_mask"], dtype=torch.bool
+    )
+    probe_dict["calibrated_thresholds_6m_requires_sanitization"] = torch.tensor(
+        thresholds_6m_diag["requires_sanitization"], dtype=torch.bool
     )
     probe_dict["calibration_seeds"] = calibration_seeds
 

@@ -55,6 +55,7 @@ setup(
         "console_scripts": [
             "run-probing=run_probing:main",
             "run-analysis=run_analysis:main",
+            "run-single-experiment=run_single_experiment:main",
         ],
     },
     include_package_data=True,

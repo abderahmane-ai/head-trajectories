@@ -32,7 +32,7 @@ pip install -r requirements.txt
 python run_tests.py
 ```
 
-You should see: `60 passed in ~4s`
+You should see the test suite complete successfully. The exact count may change over time; at the time of writing, the suite contains 79 tests.
 
 ## Quick Demo (Local)
 
@@ -152,8 +152,8 @@ Figures saved to figures/:
   - fig4_stability.png
 
 Hypothesis verdicts:
-  H1 (Sink First): SUPPORTED
-  H2 (Ordered Development): SUPPORTED
+  H1 (Sink First): supported or not supported depending on results
+  H2 (Ordered Development): supported or not supported depending on results
   ...
 ```
 

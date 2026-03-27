@@ -200,10 +200,21 @@ def main() -> None:
 
     global_curves    = compute_global_curves(primary_results)
     per_layer_curves = compute_per_layer_curves(primary_results)
-    onset_steps      = compute_specialization_onset(global_curves, threshold_frac=0.05)
+    onset_steps = compute_specialization_onset(
+        global_curves,
+        threshold_frac=0.05,
+    )
+    learned_onset_steps = compute_specialization_onset(
+        global_curves,
+        threshold_frac=0.05,
+        exclude_positional_init=True,
+    )
 
     print_trajectory_report(
-        global_curves, per_layer_curves, onset_steps,
+        global_curves,
+        per_layer_curves,
+        onset_steps,
+        learned_onset_steps=learned_onset_steps,
         seed=primary_results[0]["seed"],
     )
 
@@ -347,22 +358,24 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────────
     # HYPOTHESIS VERDICTS SUMMARY
     # ─────────────────────────────────────────────────────────────────────────
-    sink_step_val = onset_steps.get("SINK")
-    ind_step_val  = onset_steps.get("INDUCTION")
-    sem_step_val  = onset_steps.get("SEMANTIC")
+    sink_step_val = learned_onset_steps.get("SINK")
+    prev_step_val = learned_onset_steps.get("PREV_TOKEN")
+    ind_step_val  = learned_onset_steps.get("INDUCTION")
+    sem_step_val  = learned_onset_steps.get("SEMANTIC")
 
     h1 = (
         sink_step_val is not None and
         all(
-            onset_steps.get(t) is None or onset_steps[t] >= sink_step_val
-            for t in ["PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"]
+            learned_onset_steps.get(t) is None or learned_onset_steps[t] >= sink_step_val
+            for t in ["PREV_TOKEN", "INDUCTION", "SEMANTIC"]
         )
     )
     h2 = (
         sink_step_val is not None and
+        prev_step_val is not None and
         ind_step_val  is not None and
         sem_step_val  is not None and
-        sink_step_val < ind_step_val < sem_step_val
+        sink_step_val <= prev_step_val < ind_step_val < sem_step_val
     )
 
     # H3: lower layers specialize first — use mean onset step per layer
@@ -395,7 +408,7 @@ def main() -> None:
     print(f"  HYPOTHESIS VERDICTS")
     print(f"{'=' * 64}")
     print(_verdict(h1, "H1 — Sink-First"))
-    print(_verdict(h2, "H2 — Ordered Development (S→I→Sem)"))
+    print(_verdict(h2, "H2 — Ordered Development (S→Prev→I→Sem)"))
     print(_verdict(h3, "H3 — Layer Stratification"))
     print(_verdict(h4, "H4 — Phase Transition"))
     print(_verdict(h5, "H5 — Sink Persistence"))

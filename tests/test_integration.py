@@ -4,7 +4,6 @@ Integration tests — end-to-end workflows.
 
 import pytest
 import torch
-import tempfile
 from pathlib import Path
 from model import TransformerLM, ModelConfig
 from probing.extractor import extract_attention_maps
@@ -65,40 +64,39 @@ class TestEndToEndProbing:
         assert len(scores) == 5
         assert all(isinstance(s, float) for s in scores)
     
-    def test_full_classification_workflow(self):
+    def test_full_classification_workflow(self, workspace_tmpdir):
         """Test the full classification workflow."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ties_path = Path(tmpdir) / "ties.csv"
-            output_path = Path(tmpdir) / "results.pt"
+        ties_path = workspace_tmpdir / "ties.csv"
+        output_path = workspace_tmpdir / "results.pt"
+        
+        # Create classifier
+        n_ckpts, n_layers, n_heads = 3, 2, 4
+        classifier = HeadClassifier(
+            n_checkpoints=n_ckpts,
+            n_layers=n_layers,
+            n_heads=n_heads,
+            seed=42,
+            ties_log_path=ties_path,
+        )
+        
+        # Simulate scoring all heads at all checkpoints
+        for ckpt in range(n_ckpts):
+            classifier.register_step(ckpt * 1000)
             
-            # Create classifier
-            n_ckpts, n_layers, n_heads = 3, 2, 4
-            classifier = HeadClassifier(
-                n_checkpoints=n_ckpts,
-                n_layers=n_layers,
-                n_heads=n_heads,
-                seed=42,
-                ties_log_path=ties_path,
-            )
-            
-            # Simulate scoring all heads at all checkpoints
-            for ckpt in range(n_ckpts):
-                classifier.register_step(ckpt * 1000)
-                
-                for layer in range(n_layers):
-                    for head in range(n_heads):
-                        # Generate random scores
-                        scores = tuple(torch.rand(5).tolist())
-                        classifier.record(ckpt, ckpt * 1000, layer, head, scores)
-            
-            # Save
-            classifier.save(output_path)
-            
-            # Load and verify
-            loaded = HeadClassifier.load(output_path)
-            assert loaded["label_tensor"].shape == (n_ckpts, n_layers, n_heads)
-            assert loaded["score_tensor"].shape == (n_ckpts, n_layers, n_heads, 5)
-            assert len(loaded["step_index"]) == n_ckpts
+            for layer in range(n_layers):
+                for head in range(n_heads):
+                    # Generate random scores
+                    scores = tuple(torch.rand(5).tolist())
+                    classifier.record(ckpt, ckpt * 1000, layer, head, scores)
+        
+        # Save
+        classifier.save(output_path)
+        
+        # Load and verify
+        loaded = HeadClassifier.load(output_path)
+        assert loaded["label_tensor"].shape == (n_ckpts, n_layers, n_heads)
+        assert loaded["score_tensor"].shape == (n_ckpts, n_layers, n_heads, 5)
+        assert len(loaded["step_index"]) == n_ckpts
 
 
 if __name__ == "__main__":

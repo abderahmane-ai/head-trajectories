@@ -232,6 +232,31 @@ class TestComputeSpecializationOnset:
         assert onset_steps["INDUCTION"] is None
         assert onset_steps["SEMANTIC"] is None
 
+    def test_exclude_positional_init(self):
+        """Step-0 positional onset can be excluded from learned ordering."""
+        steps = np.array([0, 100, 200, 300])
+        mean = np.zeros((4, 6))
+        mean[:, 0] = 0.7
+        mean[:, 4] = np.array([0.1, 0.0, 0.1, 0.1])
+
+        global_curves = {
+            "steps": steps,
+            "mean": mean,
+            "std": np.zeros_like(mean),
+            "per_seed": mean[np.newaxis, :, :],
+            "type_names": ["UNDIFFERENTIATED", "SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"],
+        }
+
+        onset_default = compute_specialization_onset(global_curves, threshold_frac=0.05)
+        onset_learned = compute_specialization_onset(
+            global_curves,
+            threshold_frac=0.05,
+            exclude_positional_init=True,
+        )
+
+        assert onset_default["POSITIONAL"] == 0
+        assert onset_learned["POSITIONAL"] == 200
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

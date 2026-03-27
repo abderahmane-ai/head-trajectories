@@ -49,7 +49,11 @@ def reclassify_with_scaled_thresholds(
     score_tensor = result["score_tensor"]   # (n_ckpts, n_layers, n_heads, 5)
     n_ckpts, n_layers, n_heads, _ = score_tensor.shape
 
-    scaled_thresholds = THRESHOLDS * scale_factor
+    base_thresholds = np.asarray(
+        result.get("effective_thresholds", result.get("thresholds", THRESHOLDS)),
+        dtype=np.float32,
+    )
+    scaled_thresholds = base_thresholds * scale_factor
     new_labels        = torch.zeros((n_ckpts, n_layers, n_heads), dtype=torch.int32)
 
     for ckpt in range(n_ckpts):
@@ -70,6 +74,10 @@ def reclassify_with_scaled_thresholds(
         "n_layers":     n_layers,
         "n_heads":      n_heads,
         "thresholds":   scaled_thresholds.tolist(),
+        "raw_thresholds": scaled_thresholds.tolist(),
+        "effective_thresholds": scaled_thresholds.tolist(),
+        "threshold_sanitization_mask": [False] * 5,
+        "thresholds_sanitized": False,
     }
 
 
@@ -105,7 +113,11 @@ def extract_ordering_conclusions(
     )
 
     global_curves = compute_global_curves(run_results)
-    onset_steps   = compute_specialization_onset(global_curves, threshold_frac)
+    onset_steps = compute_specialization_onset(
+        global_curves,
+        threshold_frac,
+        exclude_positional_init=True,
+    )
 
     # Sort types by onset step (None = never → sorted last)
     non_undiff = {

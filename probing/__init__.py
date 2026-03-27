@@ -17,6 +17,7 @@ from .scores import (
 from .classifier import (
     HeadClassifier,
     classify_head,
+    prepare_thresholds,
     HEAD_TYPES,
     HEAD_TYPE_COLORS,
     THRESHOLDS,
@@ -47,6 +48,7 @@ __all__ = [
     "score_head",
     "HeadClassifier",
     "classify_head",
+    "prepare_thresholds",
     "HEAD_TYPES",
     "HEAD_TYPE_COLORS",
     "THRESHOLDS",

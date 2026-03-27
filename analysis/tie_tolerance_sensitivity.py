@@ -146,9 +146,12 @@ def main():
     print(f"Loading results from: {results_path}")
     results = HeadClassifier.load(results_path)
     
-    score_tensor = results.score_tensor  # (K, L, H, 5)
-    thresholds = results.thresholds      # (5,)
-    steps = results.step_index           # List of training steps
+    score_tensor = results["score_tensor"]  # (K, L, H, 5)
+    thresholds = np.asarray(
+        results.get("effective_thresholds", results.get("thresholds")),
+        dtype=np.float32,
+    )
+    steps = results["step_index"]           # List of training steps
     
     K, L, H, _ = score_tensor.shape
     print(f"\nDataset: {K} checkpoints, {L} layers, {H} heads/layer")

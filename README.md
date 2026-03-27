@@ -8,14 +8,14 @@
 
 Most interpretability work asks *what* attention heads do after training. This project asks *when* they become what they are. We train transformers from scratch with dense checkpointing, probe every head at every checkpoint, and track developmental trajectories from initialization to convergence.
 
-**Key finding:** Heads follow a strict developmental pathway: `positional (RoPE) → sink → prev-token → induction → semantic`. Sink heads must form before prev-token heads can emerge—a prerequisite relationship in circuit formation.
+**Current evidence:** Results so far suggest an ordered developmental pathway: architectural `positional (RoPE)` structure appears at initialization, and learned specialization often proceeds through `sink → prev-token → induction → semantic`.
 
 ## Quick Start
 
 ```bash
 # Install
 pip install -r requirements.txt
-python run_tests.py  # 63 tests should pass
+python run_tests.py  # suite currently has 68 tests; local temp-dir behavior may vary by environment
 
 # Run full pipeline (requires Modal account for training)
 modal run modal_jobs/train_seed42.py        # ~5h on A100, $6
@@ -41,19 +41,19 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for detailed setup.
 - **POSITIONAL**: Content-invariant attention (KL divergence)
 - **SEMANTIC**: Alignment with embedding similarity (masked)
 
-**Classification:** Thresholds calibrated from random baseline (mean + 2σ). Heads classified by `argmax(scores / thresholds)`.
+**Classification:** Thresholds calibrated from a causally scrambled random baseline (mean + 2σ). Heads are classified by `argmax(scores / thresholds)` with defensive threshold sanitization only as a fallback for pathological calibrations.
 
 See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 
 ## Results
 
-**H1 (Sink-First):** ✓ Sinks appear in first 5% of training  
-**H2 (Ordered Development):** ✓ Strict ordering: positional → sink → prev-token → induction → semantic  
+**H1 (Sink-First):** Current runs support early sink emergence among learned head types  
+**H2 (Ordered Development):** Current evidence suggests an ordered pathway once architectural positional bias is separated from learned onset  
 **H3 (Layer Stratification):** ✓ Lower layers specialize earlier  
 **H4 (Phase Transition):** Induction heads emerge discontinuously (scale-dependent)  
 **H5 (Sink Persistence):** ✓ Sinks rarely change type once formed
 
-**Novel finding:** SINK → PREV_TOKEN pathway reveals prerequisite structure. Heads learn fixed-position anchoring before dynamic relative tracking. This suggests circuit formation follows strict dependencies, not parallel specialization.
+**Working finding:** The `SINK → PREV_TOKEN` pathway appears repeatedly in preliminary analyses. Heads may learn fixed-position anchoring before dynamic relative tracking, but that should be treated as an evidence-backed hypothesis rather than a settled law until larger runs and sensitivity checks are complete.
 
 ## Repository Structure
 
@@ -65,7 +65,7 @@ See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 ├── analysis/           Trajectory analysis + hypothesis tests
 ├── visualization/      Figure generation (300 DPI)
 ├── modal_jobs/         Cloud training scripts (4 runs)
-├── tests/              63 unit tests
+├── tests/              68 unit tests
 └── docs/               Full documentation
 ```
 

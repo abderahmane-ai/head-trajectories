@@ -24,7 +24,7 @@
 Random-baseline thresholds computed over 3 random seeds:
 - **Raw pilot thresholds:** `[0.028, 0.0039, 0.0096, 0.000, -0.036]`
 
-*(Note: The original pilot used manual threshold clamping, which has since been removed. Current methodology uses raw calibrated thresholds directly, aligning with the main codebase.)*
+*(Note: These raw pilot thresholds exposed a calibration/classification fragility. The main codebase now treats non-positive thresholds as a calibration diagnostic and applies defensive sanitization only for safe normalization.)*
 
 ### Training Dynamics
 The model learned smoothly over 12,000 steps:
@@ -44,16 +44,16 @@ When did each head type cross the 5% threshold (at least 3 heads exhibiting the 
 
 ### Key Insights
 
-**1. The `POSITIONAL` Onset at Step 0 is Not a Bug**
+**1. The `POSITIONAL` Onset at Step 0 is Architectural, Not Learned**
 Heads register as `POSITIONAL` immediately at random initialization. This is a correct architectural feature driven by **Rotary Position Embeddings (RoPE)**. 
 * At Step 0, token embeddings are random noise.
 * RoPE applies a deterministic, mathematically fixed rotation to the queries and keys purely based on their sequence position.
 * Because the token noise washes out, the *only* coherent structural signal driving the attention scores is the RoPE rotation.
 * Therefore, the attention map for two completely different sequences (the Positional Probes) look almost identical, yielding a high Positional Score.
-* *Note:* The calibration script scrambles query rows to determine the threshold, destroying the RoPE alignment. Thus, the actual untrained model easily beats the randomized baseline.
+* *Note:* The methodology now uses a causal key-scramble null for calibration, but the interpretation remains the same: RoPE can generate immediate positional structure before any learned specialization has occurred.
 
-**2. The Developmental Pathway of Sequence Tracking**
-By tracing individual head trajectories across the 12 checkpoints, a clear evolutionary dependency emerges. Look at these specific heads:
+**2. A Preliminary Developmental Pathway of Sequence Tracking**
+By tracing individual head trajectories across the 12 checkpoints, a consistent pathway appears in several heads. Look at these specific heads:
 *   `Layer 1, Head 0`: `POS` $\rightarrow$ `SINK` $\rightarrow$ `PREV_TOKEN`
 *   `Layer 1, Head 3`: `POS` $\rightarrow$ `SINK` $\rightarrow$ `UNDIFF` $\rightarrow$ `PREV_TOKEN`
 *   `Layer 1, Head 6`: `POS` $\rightarrow$ `UNDIFF` $\rightarrow$ `SINK` $\rightarrow$ `PREV` 
@@ -71,5 +71,5 @@ Lower layers and higher layers specialize differently:
 *   **Layer 1 & 2:** These heads cleanly migrate away from `POSITIONAL` via the `SINK` pathway to become stable `PREV_TOKEN` heads.
 
 ### Conclusion & Next Steps
-The pilot confirms the pipeline works brilliantly. It empirically extracts developmental hierarchies (e.g., `SINK` $\rightarrow$ `PREV_TOKEN`) and cleanly detects true architectural biases (RoPE at Step 0). 
+The pilot confirms that the pipeline can recover both architectural biases (RoPE at step 0) and plausible learned trajectories (for example `SINK` $\rightarrow$ `PREV_TOKEN`). These results are preliminary rather than conclusive. 
 *   *Next Steps:* Scale up to OpenWebText, 15M parameters, and full probe counts to see if `INDUCTION` and `SEMANTIC` heads begin to form over longer trajectories.
