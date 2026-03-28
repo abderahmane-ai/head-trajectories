@@ -300,6 +300,10 @@ def _build_hf_probe_dataset(
 ) -> Dict[str, torch.Tensor]:
     from datasets import load_dataset
 
+    print(
+        f"[Probe] Building shared probe dataset for profile={profile.name} "
+        f"(dataset={profile.dataset_name}/{profile.dataset_config})"
+    )
     dataset = load_dataset(profile.dataset_name, profile.dataset_config)
     test_tokens = _encode_split_texts(dataset["test"]["text"], profile.block_size)
     raw_sequences = [row.tolist() for row in test_tokens.view(-1, profile.block_size)]
@@ -386,6 +390,10 @@ def _build_hf_probe_dataset(
         probe_dict["heldout_positional_seqs"] = held_pos_seqs
         probe_dict["heldout_positional_pairs"] = held_pos_pairs
 
+    print(
+        "[Probe] Calibrating thresholds from random baseline "
+        f"({profile.n_calibration_seeds} seeds, device={device})..."
+    )
     thresholds_mean, thresholds_std, thresholds_per_seed, diag = calibrate_thresholds(
         probe_dict=probe_dict,
         config=profile.model_config,
@@ -416,6 +424,10 @@ def _build_hf_probe_dataset(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(probe_dict, output_path)
     verify_induction_probes(probe_dict)
+    print(f"[Probe] Saved probe dataset to: {output_path}")
+    print(f"[Probe] Mean thresholds: {thresholds_mean.tolist()}")
+    print(f"[Probe] Threshold stds : {thresholds_std.tolist()}")
+    print(f"[Probe] Requires sanitization: {diag['requires_sanitization']}")
     return probe_dict
 
 
@@ -607,6 +619,7 @@ def _train_hf_profile(
             "elapsed_min": 0.0,
         }
     )
+    print(f"step 0 | val_loss={val_loss_0:.4f} | checkpoint saved")
 
     for step in range(1, profile.total_steps + 1):
         lr = scheduler.set_lr(optimizer, step)
@@ -661,11 +674,24 @@ def _train_hf_profile(
                 "elapsed_min": (time.time() - start_time) / 60.0,
             }
         )
+        print(
+            f"step {step:5d} | "
+            f"train_loss={smooth_train_loss:.4f} | "
+            f"val_loss={val_loss:.4f} | "
+            f"lr={lr:.2e} | "
+            f"elapsed={(time.time() - start_time) / 60.0:.1f} min"
+        )
         if (
             profile.early_stopping_patience_ckpts is not None and
             step >= profile.min_steps_before_early_stop and
             no_improve_ckpts >= profile.early_stopping_patience_ckpts
         ):
+            print(
+                "early stopping triggered | "
+                f"step={step} | "
+                f"best_step={best_step} | "
+                f"best_val_loss={best_val_loss:.4f}"
+            )
             break
 
     torch.save(history, paths.train_history_path)
@@ -676,6 +702,12 @@ def _train_hf_profile(
         "checkpoint_count": len(list(paths.ckpt_dir.glob("ckpt_*.pt"))),
     }
     _write_json(paths.train_summary_path, summary)
+    print(
+        "training complete | "
+        f"best_step={best_step} | "
+        f"best_val_loss={best_val_loss:.4f} | "
+        f"checkpoints={summary['checkpoint_count']}"
+    )
     return {
         "history": history,
         **summary,
@@ -1024,14 +1056,17 @@ def run_full_single_experiment(
         },
     }
 
+    print("[Stage] Building or loading probe dataset...")
     build_or_load_probe_dataset(
         profile_obj,
         paths,
         device=device,
         rebuild=rebuild_probe,
     )
+    print(f"[Stage] Probe dataset ready: {paths.probe_path}")
 
     if not skip_train:
+        print("[Stage] Starting training...")
         manifest["training"] = run_single_training(
             profile_obj,
             seed=seed,
@@ -1039,8 +1074,10 @@ def run_full_single_experiment(
             device=device,
             reset_run=False,
         )
+        print("[Stage] Training complete.")
 
     if not skip_probe:
+        print("[Stage] Starting probing...")
         results = run_single_probing(
             profile_obj,
             seed=seed,
@@ -1054,15 +1091,19 @@ def run_full_single_experiment(
             "thresholds": results.get("effective_thresholds", results.get("thresholds")),
             "thresholds_sanitized": bool(results.get("thresholds_sanitized", False)),
         }
+        print("[Stage] Probing complete.")
 
     if not skip_analysis:
+        print("[Stage] Starting analysis...")
         manifest["analysis"] = analyze_single_run(
             profile_obj,
             seed=seed,
             artifact_root=artifact_root,
         )
+        print("[Stage] Analysis complete.")
 
     _write_json(paths.manifest_path, manifest)
+    print(f"[Stage] Manifest saved: {paths.manifest_path}")
     return manifest
 
 
