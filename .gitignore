@@ -66,6 +66,7 @@ figures/
 *.png
 *.jpg
 *.pdf
+run_exports/
 
 # Logs
 *.log
