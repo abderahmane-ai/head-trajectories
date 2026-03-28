@@ -24,6 +24,7 @@ python run_analysis.py                      # generates figures/
 ```
 
 See [docs/QUICKSTART.md](docs/QUICKSTART.md) for detailed setup.
+Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 
 ## Method
 
@@ -87,6 +88,7 @@ Total cost to reproduce: **~$25**
 ## Documentation
 
 - [QUICKSTART.md](docs/QUICKSTART.md) — Installation and execution
+- [CONTAINER.md](docs/CONTAINER.md) — Docker runtime for notebook and script workflows
 - [METHODOLOGY.md](docs/METHODOLOGY.md) — Mathematical specification
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — Codebase structure
 - [EXPERIMENT_LOG.md](docs/EXPERIMENT_LOG.md) — Pilot results and findings

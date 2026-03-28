@@ -1,4 +1,4 @@
-.PHONY: help install test lint format clean docs
+.PHONY: help install test lint format clean docs docker-build docker-shell docker-notebook
 
 help:
 	@echo "Available commands:"
@@ -8,6 +8,9 @@ help:
 	@echo "  make format     - Format code with black"
 	@echo "  make clean      - Remove generated files"
 	@echo "  make docs       - Generate documentation"
+	@echo "  make docker-build    - Build the Docker image"
+	@echo "  make docker-shell    - Start an interactive shell in the container"
+	@echo "  make docker-notebook - Launch JupyterLab in the container"
 
 install:
 	pip install -r requirements.txt
@@ -40,3 +43,12 @@ docs:
 	@echo "  - QUICKSTART.md: Getting started guide"
 	@echo "  - ARCHITECTURE.md: Codebase overview"
 	@echo "  - FAQ.md: Frequently asked questions"
+
+docker-build:
+	docker build -t head-trajectories:latest .
+
+docker-shell:
+	docker run --rm -it --gpus all -v "$$(pwd):/workspace/head-trajectories" -w /workspace/head-trajectories head-trajectories:latest
+
+docker-notebook:
+	docker run --rm -it --gpus all -p 8888:8888 -v "$$(pwd):/workspace/head-trajectories" -w /workspace/head-trajectories head-trajectories:latest jupyter lab --ip 0.0.0.0 --port 8888 --no-browser --allow-root --ServerApp.token=head-trajectories
