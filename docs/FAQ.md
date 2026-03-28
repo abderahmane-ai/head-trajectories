@@ -70,7 +70,15 @@ Yes. See `ModelConfig.small_15m()` and `ModelConfig.ablation_6m()` for examples.
 Yes! See `analysis/trajectories.py::compute_head_trajectories()` and `visualization/timeline_plot.py`.
 
 ### How do I interpret the results?
-See the paper (when published) or the docstrings in `analysis/` modules. Each hypothesis has a clear operationalization.
+The canonical hypothesis wording is:
+
+- `H1`: Sink-first among learned types — learned sink onset is no later than prev-token, induction, or semantic onset
+- `H2`: Learned ordered development — `SINK <= PREV_TOKEN < INDUCTION < SEMANTIC` after separating architectural positional initialization
+- `H3`: Layer stratification — lower layers reach substantial specialization earlier than higher layers
+- `H4`: Induction phase transition — induction emergence is abrupt rather than smooth
+- `H5`: Sink persistence — heads that become sinks remain sinks for most later checkpoints
+
+See [METHODOLOGY.md](./METHODOLOGY.md) for the exact operational definitions.
 
 ## Troubleshooting
 

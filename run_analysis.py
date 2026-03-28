@@ -407,10 +407,10 @@ def main() -> None:
     print(f"\n{'=' * 64}")
     print(f"  HYPOTHESIS VERDICTS")
     print(f"{'=' * 64}")
-    print(_verdict(h1, "H1 — Sink-First"))
-    print(_verdict(h2, "H2 — Ordered Development (S→Prev→I→Sem)"))
+    print(_verdict(h1, "H1 — Sink-First Among Learned Types"))
+    print(_verdict(h2, "H2 — Learned Ordered Development (S→Prev→I→Sem)"))
     print(_verdict(h3, "H3 — Layer Stratification"))
-    print(_verdict(h4, "H4 — Phase Transition"))
+    print(_verdict(h4, "H4 — Induction Phase Transition"))
     print(_verdict(h5, "H5 — Sink Persistence"))
     print(f"{'─' * 64}")
 

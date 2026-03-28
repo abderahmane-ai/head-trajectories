@@ -15,7 +15,7 @@ Most interpretability work asks *what* attention heads do after training. This p
 ```bash
 # Install
 pip install -r requirements.txt
-python run_tests.py  # suite currently has 68 tests; local temp-dir behavior may vary by environment
+python run_tests.py  # suite currently has 83 tests; local temp-dir behavior may vary by environment
 
 # Run full pipeline (requires Modal account for training)
 modal run modal_jobs/train_seed42.py        # ~5h on A100, $6
@@ -47,11 +47,11 @@ See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 
 ## Results
 
-**H1 (Sink-First):** Current runs support early sink emergence among learned head types  
-**H2 (Ordered Development):** Current evidence suggests an ordered pathway once architectural positional bias is separated from learned onset  
-**H3 (Layer Stratification):** ✓ Lower layers specialize earlier  
-**H4 (Phase Transition):** Induction heads emerge discontinuously (scale-dependent)  
-**H5 (Sink Persistence):** ✓ Sinks rarely change type once formed
+**H1 (Sink-First Among Learned Types):** Learned sink onset occurs no later than other learned types in current runs  
+**H2 (Learned Ordered Development):** Current evidence suggests `SINK ≤ PREV_TOKEN < INDUCTION < SEMANTIC` once architectural positional initialization is separated out  
+**H3 (Layer Stratification):** Lower layers reach specialization earlier than higher layers in current runs  
+**H4 (Induction Phase Transition):** Induction emergence appears abrupt rather than gradual in some runs and scales  
+**H5 (Sink Persistence):** Heads that become sinks usually remain sinks for most subsequent checkpoints
 
 **Working finding:** The `SINK → PREV_TOKEN` pathway appears repeatedly in preliminary analyses. Heads may learn fixed-position anchoring before dynamic relative tracking, but that should be treated as an evidence-backed hypothesis rather than a settled law until larger runs and sensitivity checks are complete.
 
@@ -65,7 +65,7 @@ See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 ├── analysis/           Trajectory analysis + hypothesis tests
 ├── visualization/      Figure generation (300 DPI)
 ├── modal_jobs/         Cloud training scripts (4 runs)
-├── tests/              68 unit tests
+├── tests/              83 unit tests
 └── docs/               Full documentation
 ```
 

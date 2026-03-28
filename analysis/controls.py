@@ -103,9 +103,10 @@ def extract_ordering_conclusions(
         dict with keys:
             "onset_steps":     Dict[str, Optional[int]] — per-type onset step
             "ordering":        List[str] — types sorted by onset (None last)
-            "h1_holds":        bool — SINK appears before all other non-UNDIFF types
-            "h2_partial_holds":bool — ordering is sinks...induction...semantic
-            "h5_sink_stable":  bool — evaluated separately in stability.py
+            "h1_holds":        bool — learned SINK onset is no later than any
+                                 other learned type
+            "h2_holds":        bool — learned onset order is
+                                 SINK <= PREV_TOKEN < INDUCTION < SEMANTIC
     """
 
     from .trajectories import (
@@ -129,30 +130,34 @@ def extract_ordering_conclusions(
         key=lambda k: (non_undiff[k] is None, non_undiff[k] or 0)
     )
 
-    # H1: SINK is first in the ordering
+    # H1: learned SINK onset is no later than all other learned types.
     h1_holds = (
-        len(ordering) > 0 and
-        ordering[0] == "SINK" and
-        onset_steps["SINK"] is not None
+        onset_steps.get("SINK") is not None and
+        all(
+            onset_steps.get(t) is None or onset_steps[t] >= onset_steps["SINK"]
+            for t in ["PREV_TOKEN", "INDUCTION", "SEMANTIC"]
+        )
     )
 
-    # H2 partial: SINK comes before INDUCTION, INDUCTION before SEMANTIC
+    # H2: learned onset order is SINK <= PREV_TOKEN < INDUCTION < SEMANTIC.
     sink_step = onset_steps.get("SINK")
+    prev_step = onset_steps.get("PREV_TOKEN")
     ind_step  = onset_steps.get("INDUCTION")
     sem_step  = onset_steps.get("SEMANTIC")
 
-    h2_partial = (
+    h2_holds = (
         sink_step is not None and
+        prev_step is not None and
         ind_step  is not None and
         sem_step  is not None and
-        sink_step < ind_step < sem_step
+        sink_step <= prev_step < ind_step < sem_step
     )
 
     return {
         "onset_steps":         onset_steps,
         "ordering":            ordering,
         "h1_holds":            h1_holds,
-        "h2_partial_holds":    h2_partial,
+        "h2_holds":            h2_holds,
     }
 
 
@@ -178,7 +183,7 @@ def run_threshold_sensitivity(
         dict with keys:
             "per_scale":         Dict[float, Dict] — conclusions per scale factor
             "robust_h1":         bool — H1 holds under all scale factors
-            "robust_h2_partial": bool — H2 partial holds under all scale factors
+            "robust_h2":         bool — H2 holds under all scale factors
             "robustness_summary":Dict[str, str] — per-conclusion verdict
     """
 
@@ -197,18 +202,18 @@ def run_threshold_sensitivity(
         per_scale[scale] = conclusions
 
     # Check which conclusions are robust across all scales
-    robust_h1         = all(per_scale[s]["h1_holds"]         for s in scale_factors)
-    robust_h2_partial = all(per_scale[s]["h2_partial_holds"] for s in scale_factors)
+    robust_h1 = all(per_scale[s]["h1_holds"] for s in scale_factors)
+    robust_h2 = all(per_scale[s]["h2_holds"] for s in scale_factors)
 
     robustness_summary = {
-        "H1 (Sink First)":              "ROBUST" if robust_h1         else "NOT ROBUST",
-        "H2 partial (Sink→Ind→Sem)":    "ROBUST" if robust_h2_partial else "NOT ROBUST",
+        "H1 (Sink-First Among Learned Types)": "ROBUST" if robust_h1 else "NOT ROBUST",
+        "H2 (Learned Ordered Development)":    "ROBUST" if robust_h2 else "NOT ROBUST",
     }
 
     return {
         "per_scale":          per_scale,
         "robust_h1":          robust_h1,
-        "robust_h2_partial":  robust_h2_partial,
+        "robust_h2":          robust_h2,
         "robustness_summary": robustness_summary,
         "scale_factors":      scale_factors,
     }
@@ -228,8 +233,8 @@ def compute_inter_seed_agreement(
     With 3 seeds → 3 pairs: (0,1), (0,2), (1,2).
 
     An ordering claim is:
-    - H1: SINK appears before all other types
-    - H2 partial: SINK onset < INDUCTION onset < SEMANTIC onset
+    - H1: learned SINK onset is no later than all other learned types
+    - H2: learned onset order is SINK <= PREV_TOKEN < INDUCTION < SEMANTIC
 
     Args:
         run_results:    list of result dicts, one per seed
@@ -257,11 +262,11 @@ def compute_inter_seed_agreement(
         conclusions  = extract_ordering_conclusions(pair_results, threshold_frac)
 
         h1_agree += int(conclusions["h1_holds"])
-        h2_agree += int(conclusions["h2_partial_holds"])
+        h2_agree += int(conclusions["h2_holds"])
         per_pair.append({
             "seed_pair":   (run_results[i]["seed"], run_results[j]["seed"]),
             "h1":          conclusions["h1_holds"],
-            "h2_partial":  conclusions["h2_partial_holds"],
+            "h2":          conclusions["h2_holds"],
             "ordering":    conclusions["ordering"],
         })
 
@@ -295,25 +300,25 @@ def print_controls_report(
         print(f"  [{marker}] {conclusion:<35}: {verdict}")
 
     print(f"\n  Per-scale breakdown:")
-    print(f"  {'Scale':>8}  {'H1':>8}  {'H2 partial':>12}")
+    print(f"  {'Scale':>8}  {'H1':>8}  {'H2':>8}")
     print(f"  {'─' * 35}")
     for scale in sensitivity["scale_factors"]:
         c    = sensitivity["per_scale"][scale]
         h1   = "YES" if c["h1_holds"]         else "NO"
-        h2   = "YES" if c["h2_partial_holds"] else "NO"
-        print(f"  {scale:>8.1f}  {h1:>8}  {h2:>12}")
+        h2   = "YES" if c["h2_holds"] else "NO"
+        print(f"  {scale:>8.1f}  {h1:>8}  {h2:>8}")
 
     print(f"\n  Inter-seed agreement ({seed_agreement['n_seeds']} seeds, "
           f"{seed_agreement['n_pairs']} pairs):")
     print(f"  {'─' * 50}")
-    print(f"  H1 (Sink First)         : {seed_agreement['h1_agreement']}")
-    print(f"  H2 partial (S→I→Sem)    : {seed_agreement['h2_agreement']}")
+    print(f"  H1 (Sink-First Among Learned Types): {seed_agreement['h1_agreement']}")
+    print(f"  H2 (Learned Ordered Development)   : {seed_agreement['h2_agreement']}")
 
     print(f"\n  Per-pair detail:")
     for pair_info in seed_agreement["per_pair"]:
         s1, s2 = pair_info["seed_pair"]
         h1     = "✓" if pair_info["h1"]         else "✗"
-        h2     = "✓" if pair_info["h2_partial"] else "✗"
+        h2     = "✓" if pair_info["h2"] else "✗"
         order  = " → ".join(pair_info["ordering"][:4])
         print(f"  Seeds ({s1},{s2}): H1={h1} H2={h2}  order: {order}...")
 

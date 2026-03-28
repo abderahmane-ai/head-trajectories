@@ -613,20 +613,35 @@ This quantifies stability versus re-specialization.
 
 The project’s five hypotheses are operationalized through these trajectory objects.
 
-### H1. Sink-first hypothesis
+### H1. Sink-first among learned types
 
-Sinks should appear earliest. Operationally:
+Canonical wording:
 
-- compute first checkpoint where sink fraction exceeds a minimum threshold
-- compare that onset against other head types
+> **Among learned head types, sink onset should occur no later than prev-token, induction, or semantic onset.**
+
+Operationally:
+
+- compute learned onset steps using `exclude_positional_init=True`
+- require `SINK` onset to be defined
+- test
+
+$$
+t_{\mathrm{sink}} \le t_{\mathrm{prev}}, \qquad
+t_{\mathrm{sink}} \le t_{\mathrm{ind}}, \qquad
+t_{\mathrm{sink}} \le t_{\mathrm{sem}},
+$$
+
+where undefined onset for another type is treated as “not earlier than sink”
 
 ### H2. Ordered development
 
-Expected order for the combined architectural-plus-learned story:
+Canonical wording:
 
-$$
-\text{positional (architectural)} \rightarrow \text{sink} \rightarrow \text{prev\_token} \rightarrow \text{induction} \rightarrow \text{semantic}.
-$$
+> **After separating architectural positional structure at initialization from learned specialization, the learned onset order should be**
+>
+> $$
+> \text{sink} \le \text{prev\_token} < \text{induction} < \text{semantic}.
+> $$
 
 **Note on positional onset:** Positional heads can appear at step 0 due to Rotary Position Embeddings (RoPE), which create deterministic position-based attention patterns before any learning occurs. This is an architectural feature, not learned specialization. The hypothesis therefore distinguishes:
 - **Architectural positional**: RoPE-driven structure at initialization (step 0)
@@ -634,36 +649,51 @@ $$
 
 Operationally:
 
-- compare onset ordering across type-fraction curves
 - report architectural positional onset separately from learned onset
-- when comparing learned types, exclude the step-0 positional crossing from the ordering statistic
+- compute learned onset steps with `exclude_positional_init=True`
+- require all four learned types to have defined onset
+- test
+
+$$
+t_{\mathrm{sink}} \le t_{\mathrm{prev}} < t_{\mathrm{ind}} < t_{\mathrm{sem}}.
+$$
 
 ### H3. Layer stratification
 
-Lower layers should specialize earlier.
+Canonical wording:
+
+> **Lower layers should reach substantial specialization earlier than higher layers.**
 
 Operationally:
 
 - compute non-undifferentiated fraction per layer over time
-- compare onset across layers
+- define layer onset as the first checkpoint where the layer reaches at least 50% specialized heads
+- test whether layer onset is non-decreasing with layer depth
 
 ### H4. Phase transition
 
-Induction heads may emerge abruptly rather than gradually.
+Canonical wording:
+
+> **Induction heads may emerge through an abrupt phase-like transition rather than a smooth gradual rise.**
 
 Operationally:
 
 - inspect induction counts as a function of step
-- align with validation loss and local discontinuity windows
+- compute crossings at 10%, 25%, and 50% of final induction count
+- measure discontinuity score from the induction-count slope profile
+- check for a nearby validation-loss inflection around the induction crossing
 
 ### H5. Sink persistence
 
-Once a head becomes a sink, it should rarely change type.
+Canonical wording:
+
+> **Once a head becomes a sink, it should usually remain a sink for most of its subsequent checkpoints.**
 
 Operationally:
 
 - count transitions out of sink state
-- compare stability of sink heads with other types
+- compute sink persistence for every head ever labeled `SINK`
+- compare sink stability with overall type-change behavior
 
 ---
 
