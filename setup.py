@@ -23,8 +23,8 @@ if requirements_file.exists():
 setup(
     name="head-trajectories",
     version="1.0.0",
-    author="Abderahmane",
-    author_email="",  # Add your email if desired
+    author="Abderahmane Ainouche",
+    author_email="abderahmane.ainouche.ai@gmail.com",
     description="Developmental Trajectories of Attention Heads - Mechanistic Interpretability Research",
     long_description=long_description,
     long_description_content_type="text/markdown",

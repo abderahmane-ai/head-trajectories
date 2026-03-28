@@ -96,7 +96,7 @@ Total cost to reproduce: **~$25**
 ```bibtex
 @misc{abderahmane2025developmental,
   title   = {Developmental Trajectories of Attention Heads},
-  author  = {Abderahmane},
+  author  = {Abderahmane Ainouche},
   year    = {2025},
   url     = {https://github.com/abderahmane-ai/head-trajectories},
   note    = {Independent research, ENSIA Algeria}
@@ -109,4 +109,4 @@ MIT License - see [LICENSE](LICENSE)
 
 ---
 
-**Author:** Abderahmane | ENSIA Algeria | [Prior work: ARU](https://doi.org/10.13140/RG.2.2.18700.58241)
+**Author:** Abderahmane Ainouche | ENSIA Algeria | Academic: `abderahmane.ainouche@ensia.edu.dz` | Contact: `abderahmane.ainouche.ai@gmail.com` | [Prior work: ARU](https://doi.org/10.13140/RG.2.2.18700.58241)
