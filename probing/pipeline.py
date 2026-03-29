@@ -55,6 +55,53 @@ def parse_step_from_path(path: Path) -> int:
     return int(path.stem.replace("ckpt_", ""))
 
 
+def _load_partial_results(
+    output_path: Path,
+    n_layers: int,
+    n_heads: int,
+    seed: int,
+) -> Optional[Dict]:
+    """
+    Load and validate partial probing results for resume mode.
+
+    Returns:
+        The loaded results dict if metadata matches, otherwise None.
+    """
+
+    if not output_path.exists():
+        return None
+
+    try:
+        partial = torch.load(output_path, weights_only=True)
+    except Exception as e:
+        print(f"  [Resume] Failed to load partial results: {e} — starting fresh\n")
+        return None
+
+    if (
+        partial.get("n_layers") == n_layers
+        and partial.get("n_heads") == n_heads
+        and partial.get("seed") == seed
+    ):
+        return partial
+
+    print("  [Resume] Partial results metadata mismatch — starting fresh\n")
+    return None
+
+
+def _save_results_atomically(classifier: HeadClassifier, output_path: Path) -> None:
+    """
+    Save probing results via temp file + replace and clean up on failure.
+    """
+
+    temp_path = output_path.with_suffix(".tmp.pt")
+    try:
+        classifier.save(temp_path)
+        temp_path.replace(output_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-checkpoint scoring
 # ─────────────────────────────────────────────────────────────────────────────
@@ -222,23 +269,15 @@ def run_probing_pipeline(
 
     # ── Check for partial results and resume if requested ────────────────────
     completed_steps = set()
-    start_ckpt_idx = 0
+    partial = None
     
     if resume and output_path.exists():
-        try:
-            partial = torch.load(output_path, weights_only=True)
-            # Validate metadata matches
-            if (partial.get("n_layers") == n_layers and 
-                partial.get("n_heads") == n_heads and
-                partial.get("seed") == seed):
-                completed_steps = set(partial.get("step_index", []))
-                if completed_steps:
-                    print(f"  [Resume] Found partial results with {len(completed_steps)} completed checkpoints")
-                    print(f"  [Resume] Will skip already-processed checkpoints\n")
-            else:
-                print(f"  [Resume] Partial results metadata mismatch — starting fresh\n")
-        except Exception as e:
-            print(f"  [Resume] Failed to load partial results: {e} — starting fresh\n")
+        partial = _load_partial_results(output_path, n_layers, n_heads, seed)
+        if partial is not None:
+            completed_steps = set(partial.get("step_index", []))
+            if completed_steps:
+                print(f"  [Resume] Found partial results with {len(completed_steps)} completed checkpoints")
+                print(f"  [Resume] Will skip already-processed checkpoints\n")
 
     # ── Initialize classifier ─────────────────────────────────────────────────
     classifier = HeadClassifier(
@@ -251,8 +290,7 @@ def run_probing_pipeline(
     )
     
     # Restore partial results if resuming
-    if completed_steps:
-        partial = torch.load(output_path, weights_only=True)
+    if partial is not None and completed_steps:
         classifier.label_tensor = partial["label_tensor"]
         classifier.score_tensor = partial["score_tensor"]
         classifier.step_index = partial["step_index"]
@@ -282,10 +320,13 @@ def run_probing_pipeline(
                 batch_size=batch_size,
             )
         except Exception as e:
-            print(f"  [WARNING] Failed to process {ckpt_path.name}: {e}. Skipping.")
-            # Record zeros for this checkpoint so tensor dimensions remain consistent
-            classifier.register_step(step)
-            continue
+            classifier.flush_ties()
+            _save_results_atomically(classifier, output_path)
+            raise RuntimeError(
+                f"Failed to process checkpoint {ckpt_path.name} at step {step}. "
+                "Partial probing results were saved; fix the checkpoint or remove it "
+                "before resuming."
+            ) from e
 
         # Score all heads and record
         classifier.register_step(step)
@@ -300,10 +341,7 @@ def run_probing_pipeline(
         # Flush tie log and save incrementally every 10 checkpoints
         if (ckpt_idx + 1) % 10 == 0:
             classifier.flush_ties()
-            # Atomic save: write to temp file, then rename
-            temp_path = output_path.with_suffix('.tmp.pt')
-            classifier.save(temp_path)
-            temp_path.replace(output_path)
+            _save_results_atomically(classifier, output_path)
             print(f"  [Checkpoint] Incremental save at {ckpt_idx + 1}/{n_ckpts}")
         elif ckpt_idx % 10 == 0:
             classifier.flush_ties()
@@ -329,7 +367,7 @@ def run_probing_pipeline(
 
     # ── Final flush and save ─────────────────────────────────────────────────
     classifier.flush_ties()
-    classifier.save(output_path)
+    _save_results_atomically(classifier, output_path)
 
     total_elapsed = time.time() - t_pipeline_start
 
