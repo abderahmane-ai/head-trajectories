@@ -1,5 +1,14 @@
+import torch
+
+from data.calibration import CALIBRATION_VERSION
 from experiments.profiles import get_profile, list_profiles
-from experiments.runner import ensure_dirs, normalize_run_specs, reset_run_artifacts, resolve_artifacts
+from experiments.runner import (
+    build_or_load_probe_dataset,
+    ensure_dirs,
+    normalize_run_specs,
+    reset_run_artifacts,
+    resolve_artifacts,
+)
 
 
 def test_profiles_are_available():
@@ -44,3 +53,33 @@ def test_reset_run_artifacts_preserves_probe_by_default(workspace_tmpdir):
 
     assert paths.seed_dir.exists() is False
     assert paths.probe_path.exists() is True
+
+
+def test_build_or_load_probe_dataset_rebuilds_stale_probe(monkeypatch, workspace_tmpdir):
+    profile = get_profile("wikitext103_15m_preliminary")
+    paths = resolve_artifacts(profile, seed=13, artifact_root=workspace_tmpdir)
+    ensure_dirs(paths)
+
+    stale_probe = {
+        "general_seqs": torch.zeros((1, profile.block_size), dtype=torch.long),
+        "induction_seqs": torch.zeros((1, profile.block_size), dtype=torch.long),
+        "induction_p1": torch.zeros((1,), dtype=torch.long),
+        "induction_p2": torch.zeros((1,), dtype=torch.long),
+        "positional_seqs": torch.zeros((2, profile.block_size), dtype=torch.long),
+        "positional_pairs": torch.tensor([[0, 1]], dtype=torch.long),
+        "creation_seed": torch.tensor(0, dtype=torch.long),
+        "block_size": torch.tensor(profile.block_size, dtype=torch.long),
+        "calibration_version": torch.tensor(CALIBRATION_VERSION - 1, dtype=torch.long),
+    }
+    torch.save(stale_probe, paths.probe_path)
+
+    rebuilt = {"general_seqs": torch.ones((1, profile.block_size), dtype=torch.long)}
+
+    def fake_build(*args, **kwargs):
+        return rebuilt
+
+    monkeypatch.setattr("experiments.runner._build_hf_probe_dataset", fake_build)
+
+    loaded = build_or_load_probe_dataset(profile, paths, device="cpu", rebuild=False)
+
+    assert loaded is rebuilt

@@ -451,8 +451,16 @@ is the total number of heads in the model.
 Then the single-seed threshold is:
 
 $$
-\tau_m = \mu_m + 2\sigma_m.
+\tau_m =
+\begin{cases}
+\mu_m + 2\sigma_m, & m \in \{\text{sink}, \text{prev-token}, \text{induction}, \text{positional}\}, \\
+Q_{0.99}(r_{\cdot,m}), & m = \text{semantic},
+\end{cases}
 $$
+
+where \(Q_{0.99}(r_{\cdot,m})\) is the empirical 99th percentile of the semantic null scores across heads for that calibration seed.
+
+The semantic exception is intentional. The semantic metric is a signed Pearson-correlation statistic, and its null variance collapses sharply once per-position correlations are averaged into a final per-head score. In practice, using \(\mu_m + 2\sigma_m\) for semantic produced thresholds that were too permissive. A high null quantile is therefore used for semantic while the other four metrics retain the original mean-plus-two-standard-deviations rule.
 
 ### 6.3 Multi-seed calibration
 
@@ -461,6 +469,7 @@ The repository repeats this calibration across several random seeds and stores:
 - per-seed threshold vectors
 - per-seed metric means
 - per-seed metric standard deviations
+- per-seed metric quantiles (`p95`, `p99`)
 - whether any threshold was non-positive and would require defensive sanitization at classification time
 - their empirical mean
 - their empirical standard deviation

@@ -7,7 +7,9 @@ import pytest
 import torch
 
 from data.calibration import (
+    SEMANTIC_METRIC_INDEX,
     _shuffle_attention_rows,
+    _compute_threshold_statistics,
     _scramble_causal_attention_keys,
     calibrate_thresholds,
 )
@@ -70,6 +72,24 @@ class TestCalibrationNulls:
 class TestCalibrateThresholds:
     """Smoke tests for threshold calibration."""
 
+    def test_semantic_threshold_uses_p99_not_mean_plus_2std(self):
+        scores = np.zeros((100, 5), dtype=np.float32)
+        scores[:, 0] = np.linspace(0.1, 0.2, 100)
+        scores[:, 1] = np.linspace(0.2, 0.3, 100)
+        scores[:, 2] = np.linspace(0.3, 0.4, 100)
+        scores[:, 3] = np.linspace(0.4, 0.5, 100)
+        scores[:, 4] = np.linspace(-0.02, 0.02, 100)
+
+        thresholds, means, stds, _, p99 = _compute_threshold_statistics(scores)
+
+        semantic_mean_plus_2std = means[SEMANTIC_METRIC_INDEX] + 2.0 * stds[SEMANTIC_METRIC_INDEX]
+        assert thresholds[SEMANTIC_METRIC_INDEX] == pytest.approx(
+            p99[SEMANTIC_METRIC_INDEX], rel=1e-6
+        )
+        assert thresholds[SEMANTIC_METRIC_INDEX] != pytest.approx(
+            semantic_mean_plus_2std, rel=1e-3
+        )
+
     def test_calibration_returns_finite_positive_thresholds(self, small_config):
         T = small_config.block_size
         probe_dict = {
@@ -99,4 +119,7 @@ class TestCalibrateThresholds:
         assert np.all(mean > 0.0)
         assert diagnostics["per_seed_metric_means"].shape == (2, 5)
         assert diagnostics["per_seed_metric_stds"].shape == (2, 5)
+        assert diagnostics["per_seed_metric_p95"].shape == (2, 5)
+        assert diagnostics["per_seed_metric_p99"].shape == (2, 5)
         assert diagnostics["per_seed_nonpositive_mask"].shape == (2, 5)
+        assert diagnostics["threshold_rules"][SEMANTIC_METRIC_INDEX].startswith("quantile_")

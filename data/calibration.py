@@ -3,8 +3,16 @@ data/calibration.py — Random-baseline calibration for head type thresholds.
 
 Computes per-score thresholds by measuring head scores on a randomly
 initialized model with causally valid attention maps whose key positions
-have been scrambled within each query row. Thresholds are set to mean + 2*std
-across all heads for each score.
+have been scrambled within each query row.
+
+Threshold rules:
+  - sink / prev-token / induction / positional: mean + 2 * std
+  - semantic: null p99
+
+The semantic rule is intentionally stricter because the semantic metric is a
+signed correlation statistic whose null variance collapses sharply after the
+final per-head averaging step. Using mean + 2 * std for semantic was found to
+be too permissive in practice.
 """
 
 import random
@@ -15,6 +23,25 @@ import torch
 
 from model import ModelConfig, TransformerLM
 from probing.scores import score_head
+
+
+METRIC_NAMES: Tuple[str, ...] = (
+    "SINK",
+    "PREV_TOKEN",
+    "INDUCTION",
+    "POSITIONAL",
+    "SEMANTIC",
+)
+CALIBRATION_VERSION: int = 2
+SEMANTIC_METRIC_INDEX: int = 4
+SEMANTIC_THRESHOLD_QUANTILE: float = 0.99
+DEFAULT_THRESHOLD_RULES: Tuple[str, ...] = (
+    "mean_plus_2std",
+    "mean_plus_2std",
+    "mean_plus_2std",
+    "mean_plus_2std",
+    f"quantile_{SEMANTIC_THRESHOLD_QUANTILE:.2f}",
+)
 
 
 @torch.no_grad()
@@ -116,13 +143,40 @@ def _scramble_causal_attention_keys(
     return scrambled
 
 
+def _compute_threshold_statistics(
+    scores_arr: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Compute threshold statistics for one calibration seed.
+
+    Returns:
+        thresholds, means, stds, quantiles_p95, quantiles_p99
+    """
+
+    means = scores_arr.mean(axis=0)
+    stds = scores_arr.std(axis=0)
+    quantiles_p95 = np.quantile(scores_arr, 0.95, axis=0)
+    quantiles_p99 = np.quantile(scores_arr, SEMANTIC_THRESHOLD_QUANTILE, axis=0)
+
+    thresholds = means + 2.0 * stds
+    thresholds[SEMANTIC_METRIC_INDEX] = quantiles_p99[SEMANTIC_METRIC_INDEX]
+
+    return (
+        thresholds.astype(np.float32),
+        means.astype(np.float32),
+        stds.astype(np.float32),
+        quantiles_p95.astype(np.float32),
+        quantiles_p99.astype(np.float32),
+    )
+
+
 def _calibrate_thresholds_single(
     probe_dict: Dict[str, torch.Tensor],
     config: ModelConfig,
     device: torch.device,
     seed: int,
     batch_size: int,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -178,14 +232,16 @@ def _calibrate_thresholds_single(
             score_list.append(list(scores))
 
     scores_arr = np.array(score_list, dtype=np.float32)  # (n_heads_total, 5)
-    means = scores_arr.mean(axis=0)
-    stds = scores_arr.std(axis=0)
-    thresholds = means + 2.0 * stds
+    thresholds, means, stds, quantiles_p95, quantiles_p99 = _compute_threshold_statistics(
+        scores_arr
+    )
 
     return (
         thresholds.astype(np.float32),
         means.astype(np.float32),
         stds.astype(np.float32),
+        quantiles_p95.astype(np.float32),
+        quantiles_p99.astype(np.float32),
         (thresholds <= 0.0).astype(np.bool_),
     )
 
@@ -198,7 +254,7 @@ def calibrate_thresholds(
     seeds: Optional[List[int]] = None,
     n_seeds: int = 3,
     return_diagnostics: bool = False,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray] | Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray | bool]]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray] | Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray | bool | List[str] | float]]:
     """
     Compute random-baseline thresholds for the five head-type scores across
     multiple random seeds to assess stability.
@@ -215,9 +271,11 @@ def calibrate_thresholds(
     thresholds_per_seed: List[np.ndarray] = []
     means_per_seed: List[np.ndarray] = []
     stds_per_seed: List[np.ndarray] = []
+    p95_per_seed: List[np.ndarray] = []
+    p99_per_seed: List[np.ndarray] = []
     nonpositive_mask_per_seed: List[np.ndarray] = []
     for seed in seeds:
-        thresholds, means, stds, nonpositive_mask = _calibrate_thresholds_single(
+        thresholds, means, stds, p95, p99, nonpositive_mask = _calibrate_thresholds_single(
             probe_dict=probe_dict,
             config=config,
             device=device,
@@ -227,11 +285,15 @@ def calibrate_thresholds(
         thresholds_per_seed.append(thresholds)
         means_per_seed.append(means)
         stds_per_seed.append(stds)
+        p95_per_seed.append(p95)
+        p99_per_seed.append(p99)
         nonpositive_mask_per_seed.append(nonpositive_mask)
 
     per_seed_arr = np.stack(thresholds_per_seed, axis=0).astype(np.float32)
     per_seed_means = np.stack(means_per_seed, axis=0).astype(np.float32)
     per_seed_stds = np.stack(stds_per_seed, axis=0).astype(np.float32)
+    per_seed_p95 = np.stack(p95_per_seed, axis=0).astype(np.float32)
+    per_seed_p99 = np.stack(p99_per_seed, axis=0).astype(np.float32)
     per_seed_nonpositive = np.stack(nonpositive_mask_per_seed, axis=0).astype(bool)
     mean = per_seed_arr.mean(axis=0)
     std = per_seed_arr.std(axis=0)
@@ -242,9 +304,14 @@ def calibrate_thresholds(
     diagnostics: Dict[str, np.ndarray | bool] = {
         "per_seed_metric_means": per_seed_means,
         "per_seed_metric_stds": per_seed_stds,
+        "per_seed_metric_p95": per_seed_p95,
+        "per_seed_metric_p99": per_seed_p99,
         "per_seed_nonpositive_mask": per_seed_nonpositive,
         "mean_threshold_nonpositive_mask": (mean <= 0.0),
         "requires_sanitization": bool((per_seed_nonpositive.any()) or (mean <= 0.0).any()),
+        "metric_names": list(METRIC_NAMES),
+        "threshold_rules": list(DEFAULT_THRESHOLD_RULES),
+        "semantic_threshold_quantile": SEMANTIC_THRESHOLD_QUANTILE,
     }
 
     return mean.astype(np.float32), std.astype(np.float32), per_seed_arr, diagnostics

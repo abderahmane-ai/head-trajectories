@@ -37,7 +37,7 @@ from data import (
     build_probe_dataset,
     verify_induction_probes,
 )
-from data.calibration import calibrate_thresholds
+from data.calibration import CALIBRATION_VERSION, calibrate_thresholds
 from data.loader import get_tokenizer, tokenize_text
 from data.probe import (
     build_general_probes,
@@ -342,6 +342,7 @@ def _build_hf_probe_dataset(
 
     probe_dict: Dict[str, torch.Tensor] = {
         "general_seqs": build_general_probes(pool_general, profile.n_general, profile.block_size, seed),
+        "calibration_version": torch.tensor(CALIBRATION_VERSION, dtype=torch.long),
         "creation_seed": torch.tensor(seed, dtype=torch.long),
         "block_size": torch.tensor(profile.block_size, dtype=torch.long),
     }
@@ -411,6 +412,12 @@ def _build_hf_probe_dataset(
     probe_dict[f"calibrated_thresholds_{prefix}_metric_stds"] = torch.tensor(
         diag["per_seed_metric_stds"], dtype=torch.float32
     )
+    probe_dict[f"calibrated_thresholds_{prefix}_metric_p95"] = torch.tensor(
+        diag["per_seed_metric_p95"], dtype=torch.float32
+    )
+    probe_dict[f"calibrated_thresholds_{prefix}_metric_p99"] = torch.tensor(
+        diag["per_seed_metric_p99"], dtype=torch.float32
+    )
     probe_dict[f"calibrated_thresholds_{prefix}_nonpositive_mask"] = torch.tensor(
         diag["per_seed_nonpositive_mask"], dtype=torch.bool
     )
@@ -427,6 +434,7 @@ def _build_hf_probe_dataset(
     print(f"[Probe] Saved probe dataset to: {output_path}")
     print(f"[Probe] Mean thresholds: {thresholds_mean.tolist()}")
     print(f"[Probe] Threshold stds : {thresholds_std.tolist()}")
+    print(f"[Probe] Threshold rules: {diag['threshold_rules']}")
     print(f"[Probe] Requires sanitization: {diag['requires_sanitization']}")
     return probe_dict
 
@@ -447,8 +455,19 @@ def build_or_load_probe_dataset(
 
     if paths.probe_path.exists():
         probe_dict = torch.load(paths.probe_path, weights_only=True)
-        verify_induction_probes(probe_dict)
-        return probe_dict
+        calibration_version = int(
+            probe_dict.get("calibration_version", torch.tensor(0, dtype=torch.long)).item()
+        )
+        if calibration_version != CALIBRATION_VERSION:
+            print(
+                "[Probe] Existing probe dataset is stale "
+                f"(calibration_version={calibration_version}, expected={CALIBRATION_VERSION}). "
+                "Rebuilding with current calibration rules..."
+            )
+            paths.probe_path.unlink()
+        else:
+            verify_induction_probes(probe_dict)
+            return probe_dict
 
     device_obj = resolve_device(device) if isinstance(device, str) else device
     if profile_obj.dataset_family == "openwebtext_stream":

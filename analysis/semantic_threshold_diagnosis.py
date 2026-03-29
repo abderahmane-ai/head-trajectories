@@ -38,7 +38,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from data.calibration import _extract_attention_maps, _scramble_causal_attention_keys
+from data.calibration import (
+    DEFAULT_THRESHOLD_RULES,
+    METRIC_NAMES,
+    SEMANTIC_METRIC_INDEX,
+    _extract_attention_maps,
+    _scramble_causal_attention_keys,
+)
 from experiments.profiles import ExperimentProfile, get_profile
 from experiments.runner import resolve_artifacts, resolve_device
 from model import TransformerLM
@@ -46,9 +52,6 @@ from probing.classifier import HEAD_TYPES, classify_head
 from probing.extractor import extract_checkpoint
 from probing.pipeline import discover_checkpoints
 from probing.scores import score_head
-
-
-METRIC_NAMES = ["SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -397,6 +400,7 @@ def _write_markdown_report(path: Path, report: Dict[str, object]) -> None:
     lines.append("## Threshold")
     lines.append("")
     lines.append(f"- Semantic threshold: `{report['semantic']['threshold']:.9f}`")
+    lines.append(f"- Semantic threshold rule: `{report['semantic']['threshold_rule']}`")
     lines.append(f"- Threshold percentile within random-null semantic head scores: `{report['semantic']['threshold_percentile_in_null']:.2f}`")
     lines.append("")
     lines.append("## Main finding")
@@ -459,7 +463,8 @@ def main() -> None:
         )
 
     threshold_vector = probe_dict[threshold_key].detach().cpu().numpy().astype(np.float64)
-    semantic_threshold = float(threshold_vector[4])
+    semantic_threshold = float(threshold_vector[SEMANTIC_METRIC_INDEX])
+    threshold_rule_names = list(DEFAULT_THRESHOLD_RULES)
 
     calibration_seeds = args.calibration_seeds
     if calibration_seeds is None or len(calibration_seeds) == 0:
@@ -503,7 +508,7 @@ def main() -> None:
         for score_row in real_scores
     ]
     real_labels_arr = np.asarray(real_labels, dtype=np.int32)
-    semantic_above_threshold = int((real_scores[:, 4] > semantic_threshold).sum())
+    semantic_above_threshold = int((real_scores[:, SEMANTIC_METRIC_INDEX] > semantic_threshold).sum())
     semantic_label_count = int((real_labels_arr == 5).sum())
 
     null_metric_summaries = {
@@ -521,13 +526,18 @@ def main() -> None:
             metric_name: float(threshold_vector[idx])
             for idx, metric_name in enumerate(METRIC_NAMES)
         },
+        "threshold_rules": {
+            metric_name: str(threshold_rule_names[idx])
+            for idx, metric_name in enumerate(METRIC_NAMES)
+        },
         "null_metric_summaries": null_metric_summaries,
         "semantic": {
             "threshold": semantic_threshold,
-            "threshold_percentile_in_null": _percentile_rank(null_scores[:, 4], semantic_threshold),
-            "null_head_scores": _stats(null_scores[:, 4]),
+            "threshold_rule": str(threshold_rule_names[SEMANTIC_METRIC_INDEX]),
+            "threshold_percentile_in_null": _percentile_rank(null_scores[:, SEMANTIC_METRIC_INDEX], semantic_threshold),
+            "null_head_scores": _stats(null_scores[:, SEMANTIC_METRIC_INDEX]),
             "null_position_corrs": _stats(null_position_corrs),
-            "real_head_scores": _stats(real_scores[:, 4]),
+            "real_head_scores": _stats(real_scores[:, SEMANTIC_METRIC_INDEX]),
             "real_position_corrs": _stats(real_position_corrs),
             "real_above_threshold_count": semantic_above_threshold,
             "real_semantic_label_count": semantic_label_count,
@@ -542,7 +552,12 @@ def main() -> None:
     json_path = output_dir / "semantic_threshold_diagnosis.json"
     md_path = output_dir / "semantic_threshold_diagnosis.md"
 
-    _plot_head_score_histogram(null_scores[:, 4], real_scores[:, 4], semantic_threshold, head_hist_path)
+    _plot_head_score_histogram(
+        null_scores[:, SEMANTIC_METRIC_INDEX],
+        real_scores[:, SEMANTIC_METRIC_INDEX],
+        semantic_threshold,
+        head_hist_path,
+    )
     _plot_position_corr_histogram(null_position_corrs, real_position_corrs, pos_hist_path)
 
     report["outputs"] = {

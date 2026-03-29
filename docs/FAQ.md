@@ -47,7 +47,7 @@ We run 3 seeds and report inter-seed agreement. Controls include threshold sensi
 Cost-benefit tradeoff. 3 seeds provide reasonable confidence while keeping compute costs under $25.
 
 ### How were thresholds chosen?
-Calibrated from a random baseline: initialize random models (15M and 6M), causally scramble key positions within each valid attention row to destroy structured behavior while preserving causal row-stochastic attention, compute all 5 scores, and set each threshold to `mean + 2*std`. Calibration runs 3 seeds, stores per-seed diagnostics, and flags any non-positive thresholds that would require defensive sanitization at classification time. See `data/calibration.py`.
+Calibrated from a random baseline: initialize random models (15M and 6M), causally scramble key positions within each valid attention row to destroy structured behavior while preserving causal row-stochastic attention, compute all 5 scores, and then apply metric-specific null thresholds. `SINK`, `PREV_TOKEN`, `INDUCTION`, and `POSITIONAL` use `mean + 2*std`; `SEMANTIC` uses the null `p99` because the per-head semantic null becomes too tightly concentrated after averaging. Calibration runs 3 seeds, stores per-seed diagnostics and quantiles, and flags any non-positive thresholds that would require defensive sanitization at classification time. See `data/calibration.py`.
 
 ### What about other head types?
 The five types we study are the most well-documented. The framework is extensible - you can add new scoring functions.

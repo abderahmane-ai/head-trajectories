@@ -42,7 +42,7 @@ Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 - **POSITIONAL**: Content-invariant attention (KL divergence)
 - **SEMANTIC**: Alignment with embedding similarity (masked)
 
-**Classification:** Thresholds calibrated from a causally scrambled random baseline (mean + 2σ). Heads are classified by `argmax(scores / thresholds)` with defensive threshold sanitization only as a fallback for pathological calibrations.
+**Classification:** Thresholds are calibrated from a causally scrambled random baseline. `SINK`, `PREV_TOKEN`, `INDUCTION`, and `POSITIONAL` use `mean + 2σ`; `SEMANTIC` uses the null `p99` because its per-head null variance collapses after averaging. Heads are classified by `argmax(scores / thresholds)` with defensive threshold sanitization only as a fallback for pathological calibrations.
 
 See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 
