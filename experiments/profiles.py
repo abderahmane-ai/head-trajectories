@@ -24,6 +24,7 @@ class ExperimentProfile:
     total_steps: int
     batch_size: int
     block_size: int
+    text_column: str = "text"
     max_lr: float = 3e-4
     min_lr: float = 3e-5
     warmup_steps: int = 200
@@ -64,6 +65,7 @@ PROFILE_REGISTRY: Dict[str, ExperimentProfile] = {
         dataset_family="huggingface_lm",
         dataset_name="Salesforce/wikitext",
         dataset_config="wikitext-103-raw-v1",
+        text_column="text",
         model_config=ModelConfig.small_15m(),
         total_steps=12_000,
         batch_size=64,
@@ -84,12 +86,40 @@ PROFILE_REGISTRY: Dict[str, ExperimentProfile] = {
         early_stopping_patience_ckpts=3,
         min_steps_before_early_stop=2500,
     ),
+    "ptb_15m_comparison": ExperimentProfile(
+        name="ptb_15m_comparison",
+        description="Dataset-comparison run on Penn Treebank with the primary 15M architecture.",
+        dataset_family="huggingface_lm",
+        dataset_name="ptb-text-only/ptb_text_only",
+        dataset_config="penn_treebank",
+        text_column="sentence",
+        model_config=ModelConfig.small_15m(),
+        total_steps=12_000,
+        batch_size=64,
+        block_size=256,
+        max_lr=3e-4,
+        min_lr=3e-5,
+        warmup_steps=500,
+        val_batches=20,
+        probe_batch_size=64,
+        n_general=96,
+        n_induction=24,
+        n_pairs=12,
+        n_general_holdout=24,
+        n_induction_holdout=8,
+        n_pairs_holdout=4,
+        n_calibration_seeds=3,
+        checkpoint_steps=(0, 50, 100, 200, 400, 800, 1200, 1800, 2500, 3200, 4000, 6000, 9000, 12000),
+        early_stopping_patience_ckpts=3,
+        min_steps_before_early_stop=2500,
+    ),
     "openwebtext_15m_main": ExperimentProfile(
         name="openwebtext_15m_main",
         description="Main-scale 15M run on OpenWebText using the repo's streaming trainer.",
         dataset_family="openwebtext_stream",
         dataset_name="openwebtext",
         dataset_config=None,
+        text_column="text",
         model_config=ModelConfig.small_15m(),
         total_steps=100_000,
         batch_size=32,
@@ -113,6 +143,7 @@ PROFILE_REGISTRY: Dict[str, ExperimentProfile] = {
         dataset_family="openwebtext_stream",
         dataset_name="openwebtext",
         dataset_config=None,
+        text_column="text",
         model_config=ModelConfig.ablation_6m(),
         total_steps=100_000,
         batch_size=32,

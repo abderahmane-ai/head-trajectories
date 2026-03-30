@@ -255,6 +255,23 @@ def _encode_split_texts(texts: Sequence[str], block_size: int) -> torch.Tensor:
     return torch.tensor(flat_tokens[:usable], dtype=torch.long)
 
 
+def _get_hf_split_texts(
+    dataset,
+    split_name: str,
+    text_column: str,
+) -> Sequence[str]:
+    """Return the requested text-like column from one Hugging Face split."""
+
+    split = dataset[split_name]
+    if text_column not in split.column_names:
+        available = ", ".join(split.column_names)
+        raise KeyError(
+            f"Dataset split '{split_name}' does not contain column '{text_column}'. "
+            f"Available columns: {available}"
+        )
+    return split[text_column]
+
+
 def _sample_batch(
     tokens: torch.Tensor,
     batch_size: int,
@@ -305,7 +322,10 @@ def _build_hf_probe_dataset(
         f"(dataset={profile.dataset_name}/{profile.dataset_config})"
     )
     dataset = load_dataset(profile.dataset_name, profile.dataset_config)
-    test_tokens = _encode_split_texts(dataset["test"]["text"], profile.block_size)
+    test_tokens = _encode_split_texts(
+        _get_hf_split_texts(dataset, "test", profile.text_column),
+        profile.block_size,
+    )
     raw_sequences = [row.tolist() for row in test_tokens.view(-1, profile.block_size)]
 
     rng = random.Random(seed)
@@ -573,8 +593,14 @@ def _train_hf_profile(
 
     set_seed(seed)
     dataset = load_dataset(profile.dataset_name, profile.dataset_config)
-    train_tokens = _encode_split_texts(dataset["train"]["text"], profile.block_size)
-    val_tokens = _encode_split_texts(dataset["validation"]["text"], profile.block_size)
+    train_tokens = _encode_split_texts(
+        _get_hf_split_texts(dataset, "train", profile.text_column),
+        profile.block_size,
+    )
+    val_tokens = _encode_split_texts(
+        _get_hf_split_texts(dataset, "validation", profile.text_column),
+        profile.block_size,
+    )
 
     model = TransformerLM(profile.model_config).to(device)
     decay_params = []
