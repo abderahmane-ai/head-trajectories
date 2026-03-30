@@ -14,19 +14,22 @@ from experiments.runner import (
 def test_profiles_are_available():
     names = [profile.name for profile in list_profiles()]
     assert "wikitext103_15m_preliminary" in names
-    assert "ptb_15m_comparison" in names
+    assert "lm1b_15m_comparison" in names
     assert "openwebtext_15m_main" in names
     assert "openwebtext_6m_ablation" in names
 
 
-def test_ptb_profile_uses_sentence_column():
-    profile = get_profile("ptb_15m_comparison")
+def test_lm1b_profile_uses_custom_split_layout():
+    profile = get_profile("lm1b_15m_comparison")
 
     assert profile.dataset_family == "huggingface_lm"
-    assert profile.dataset_name == "ptb-text-only/ptb_text_only"
-    assert profile.dataset_config == "penn_treebank"
-    assert profile.text_column == "sentence"
-    assert profile.n_general < get_profile("wikitext103_15m_preliminary").n_general
+    assert profile.dataset_name == "FrankCCCCC/lm1b"
+    assert profile.dataset_config is None
+    assert profile.text_column == "text"
+    assert profile.train_split == "train"
+    assert profile.validation_split == "test"
+    assert profile.probe_split == "test"
+    assert profile.n_general == get_profile("wikitext103_15m_preliminary").n_general
 
 
 def test_normalize_run_specs_supports_seed_and_seeds():

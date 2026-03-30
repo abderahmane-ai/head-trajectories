@@ -25,6 +25,9 @@ class ExperimentProfile:
     batch_size: int
     block_size: int
     text_column: str = "text"
+    train_split: str = "train"
+    validation_split: str = "validation"
+    probe_split: str = "test"
     max_lr: float = 3e-4
     min_lr: float = 3e-5
     warmup_steps: int = 200
@@ -86,28 +89,31 @@ PROFILE_REGISTRY: Dict[str, ExperimentProfile] = {
         early_stopping_patience_ckpts=3,
         min_steps_before_early_stop=2500,
     ),
-    "ptb_15m_comparison": ExperimentProfile(
-        name="ptb_15m_comparison",
-        description="Dataset-comparison run on Penn Treebank with the primary 15M architecture.",
+    "lm1b_15m_comparison": ExperimentProfile(
+        name="lm1b_15m_comparison",
+        description="Dataset-comparison run on LM1B with the primary 15M architecture.",
         dataset_family="huggingface_lm",
-        dataset_name="ptb-text-only/ptb_text_only",
-        dataset_config="penn_treebank",
-        text_column="sentence",
+        dataset_name="FrankCCCCC/lm1b",
+        dataset_config=None,
         model_config=ModelConfig.small_15m(),
         total_steps=12_000,
         batch_size=64,
         block_size=256,
+        text_column="text",
+        train_split="train",
+        validation_split="test",
+        probe_split="test",
         max_lr=3e-4,
         min_lr=3e-5,
         warmup_steps=500,
         val_batches=20,
         probe_batch_size=64,
-        n_general=96,
-        n_induction=24,
-        n_pairs=12,
-        n_general_holdout=24,
-        n_induction_holdout=8,
-        n_pairs_holdout=4,
+        n_general=240,
+        n_induction=64,
+        n_pairs=32,
+        n_general_holdout=64,
+        n_induction_holdout=16,
+        n_pairs_holdout=8,
         n_calibration_seeds=3,
         checkpoint_steps=(0, 50, 100, 200, 400, 800, 1200, 1800, 2500, 3200, 4000, 6000, 9000, 12000),
         early_stopping_patience_ckpts=3,

@@ -323,7 +323,7 @@ def _build_hf_probe_dataset(
     )
     dataset = load_dataset(profile.dataset_name, profile.dataset_config)
     test_tokens = _encode_split_texts(
-        _get_hf_split_texts(dataset, "test", profile.text_column),
+        _get_hf_split_texts(dataset, profile.probe_split, profile.text_column),
         profile.block_size,
     )
     raw_sequences = [row.tolist() for row in test_tokens.view(-1, profile.block_size)]
@@ -594,11 +594,11 @@ def _train_hf_profile(
     set_seed(seed)
     dataset = load_dataset(profile.dataset_name, profile.dataset_config)
     train_tokens = _encode_split_texts(
-        _get_hf_split_texts(dataset, "train", profile.text_column),
+        _get_hf_split_texts(dataset, profile.train_split, profile.text_column),
         profile.block_size,
     )
     val_tokens = _encode_split_texts(
-        _get_hf_split_texts(dataset, "validation", profile.text_column),
+        _get_hf_split_texts(dataset, profile.validation_split, profile.text_column),
         profile.block_size,
     )
 
