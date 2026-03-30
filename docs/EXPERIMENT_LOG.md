@@ -1,5 +1,7 @@
 # Experiment Log
 
+This file is a historical log of early pilot runs. For current-calibration archived findings and their run reports, see the local `run_exports/` archive rather than treating the notes below as the current state of evidence.
+
 ## Preliminary Pilot Run: `modal_a100_preliminary`
 
 **Date:** March 2026  

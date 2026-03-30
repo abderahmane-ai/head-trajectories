@@ -3,7 +3,7 @@
 ## General
 
 ### What is this project about?
-This project studies when and how attention heads in transformers develop their specialized behaviors during training. We track 64 heads across 100 checkpoints to understand their developmental trajectories.
+This project studies when and how attention heads in transformers develop their specialized behaviors during training. We track all heads across a profile-specific checkpoint schedule to understand their developmental trajectories.
 
 ### Is this related to any paper?
 This is independent research. A paper may be published based on these results.
@@ -16,8 +16,8 @@ Yes! The code is MIT licensed. Please cite this repository if you use it.
 ### Why build a transformer from scratch?
 We need precise control over attention extraction. Using HuggingFace would add unnecessary complexity and make attention map extraction harder.
 
-### Why 100 checkpoints?
-The dense-early schedule captures rapid early development while remaining computationally feasible. Most interesting dynamics happen in the first 20% of training.
+### Why dense checkpointing?
+The dense-early schedule captures rapid early development while remaining computationally feasible. Most interesting dynamics happen in the first part of training, so the profiles save checkpoints much more densely early on than late.
 
 ### Why these five head types?
 These are well-established behavioral patterns in the mechanistic interpretability literature: sinks, prev-token, induction, positional, and semantic heads.
@@ -41,10 +41,10 @@ Yes, but you'll need a GPU for training. The probing pipeline runs fine on CPU.
 - Version-controlled thresholds
 
 ### What about statistical significance?
-We run 3 seeds and report inter-seed agreement. Controls include threshold sensitivity (±20%) and per-seed consistency checks.
+The intended main-study setup uses multiple seeds and reports inter-seed agreement. Controls include threshold sensitivity checks and per-seed consistency checks, but single-seed pilot or comparison runs should be treated as exploratory rather than conclusive.
 
 ### Why not more seeds?
-Cost-benefit tradeoff. 3 seeds provide reasonable confidence while keeping compute costs under $25.
+Cost-benefit tradeoff. Multi-seed runs are the right standard for stronger claims, but notebook-scale exploratory runs are often done first to validate methodology, inspect score geometry, and compare datasets cheaply.
 
 ### How were thresholds chosen?
 Calibrated from a random baseline: initialize random models (15M and 6M), causally scramble key positions within each valid attention row to destroy structured behavior while preserving causal row-stochastic attention, compute all 5 scores, and then apply metric-specific null thresholds. `SINK`, `PREV_TOKEN`, `INDUCTION`, and `POSITIONAL` use `mean + 2*std`; `SEMANTIC` uses the null `p99` because the per-head semantic null becomes too tightly concentrated after averaging. Calibration runs 3 seeds, stores per-seed diagnostics and quantiles, and flags any non-positive thresholds that would require defensive sanitization at classification time. See `data/calibration.py`.
@@ -55,7 +55,7 @@ The five types we study are the most well-documented. The framework is extensibl
 ## Usage
 
 ### Can I use a different dataset?
-Yes, but you'll need to rebuild the probe dataset. The code assumes OpenWebText but is adaptable.
+Yes. The experiment runner is profile-driven and already supports multiple dataset-backed profiles, including WikiText-103, LM1B, and OpenWebText. When you change datasets, rebuild the probe dataset for that profile so calibration and held-out probes remain aligned.
 
 ### Can I change the model size?
 Yes. See `ModelConfig.small_15m()` and `ModelConfig.ablation_6m()` for examples. Adjust `n_layers`, `n_heads`, `d_model`.
@@ -78,7 +78,20 @@ The canonical hypothesis wording is:
 - `H4`: Induction phase transition — induction emergence is abrupt rather than smooth
 - `H5`: Sink persistence — heads that become sinks remain sinks for most later checkpoints
 
+Important interpretation notes:
+
+- dominant labels are summaries, not full identities
+- the raw score tensor is preserved, so a head can express multiple behaviors above threshold even if one label wins
+- onset steps are operational statistics, not immutable truths; they can be sensitive in noisy or single-seed runs
+- current single-seed comparison runs do not strongly support `H1` or `H2`
+
 See [METHODOLOGY.md](./METHODOLOGY.md) for the exact operational definitions.
+
+### Is the induction probe dataset too weak?
+Current evidence does not suggest that the induction probes are broken. Probe-integrity checks pass, and the induction metric can fire in real runs. The more likely interpretation is that induction is weak, late, or dataset-sensitive under the current small-model / 12k-step comparison settings.
+
+### Are labels the whole story?
+No. The classifier assigns a dominant label for visualization and trajectory summaries, but many heads exceed thresholds for multiple behaviors at once. This is why the repository stores the full raw score tensor in results files and why raw-score analyses can reveal mixed-behavior heads that the label view compresses.
 
 ## Troubleshooting
 

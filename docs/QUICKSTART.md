@@ -32,7 +32,7 @@ pip install -r requirements.txt
 python run_tests.py
 ```
 
-You should see the test suite complete successfully. The exact count may change over time; at the time of writing, the suite contains 83 tests.
+You should see the test suite complete successfully. The exact count changes over time, so rely on pass/fail rather than a hardcoded number.
 
 ## Quick Demo (Local)
 
@@ -103,6 +103,23 @@ modal run modal_jobs/train_seed123.py &
 modal run modal_jobs/train_seed777.py &
 ```
 
+These Modal entry points are for the long OpenWebText study. For notebook-scale comparison runs and local orchestration, prefer the profile-based notebook or `run_single_experiment.py`.
+
+## Notebook / Profile-Driven Runs
+
+The main workflow now uses named experiment profiles. Current profiles include:
+
+- `wikitext103_15m_preliminary` — fast current-method sanity run
+- `lm1b_15m_comparison` — cross-dataset comparison run
+- `openwebtext_15m_main` — main long OpenWebText run
+- `openwebtext_6m_ablation` — 6M OpenWebText scale ablation
+
+Example:
+
+```bash
+python run_single_experiment.py --profile wikitext103_15m_preliminary --seed 42
+```
+
 ### 3. Monitor progress
 ```bash
 modal app logs trajectories-seed42
@@ -126,8 +143,8 @@ python run_probing.py --seed 42
 
 Expected output:
 ```
-Found 100 checkpoints to process.
-Processing checkpoint 1/100...
+Found N checkpoints to process.
+Processing checkpoint 1/N...
 [Progress bar]
 Probing pipeline complete.
 Results saved to: results/results_seed42.pt
@@ -152,8 +169,8 @@ Figures saved to figures/:
   - fig4_stability.png
 
 Hypothesis verdicts:
-  H1 (Sink-First Among Learned Types): supported or not supported depending on results
-  H2 (Learned Ordered Development): supported or not supported depending on results
+  H1 (Sink-First Among Learned Types): supported / not supported / not robust depending on results
+  H2 (Learned Ordered Development): supported / not supported / not robust depending on results
   ...
 ```
 
@@ -182,6 +199,8 @@ pytest tests/test_scores.py -v
 ```bash
 flake8 probing/ model/ analysis/
 ```
+
+Style tooling is optional; the repository does not currently require lint-clean output for core execution.
 
 ### Generate coverage report
 ```bash
@@ -229,6 +248,7 @@ modal token set --token-id YOUR_TOKEN_ID --token-secret YOUR_TOKEN_SECRET
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) for codebase overview
 - Read [METHODOLOGY.md](METHODOLOGY.md) for the formal experimental and mathematical specification
+- Read [FAQ.md](FAQ.md) for interpretation notes on thresholds, dominant labels, and mixed behaviors
 - See [CONTRIBUTING.md](../CONTRIBUTING.md) for development guidelines
 - Check [README.md](../README.md) for full documentation
 - Explore the test suite in `tests/` for usage examples

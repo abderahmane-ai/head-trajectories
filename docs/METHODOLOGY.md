@@ -44,7 +44,8 @@ More concretely:
 
 ### Training phase
 
-- A decoder-only transformer is trained from scratch on OpenWebText.
+- A decoder-only transformer is trained from scratch according to a named experiment profile.
+- The current repository supports notebook-scale comparison profiles on WikiText-103 and LM1B, plus longer OpenWebText runs.
 - Checkpoints are saved on a **dense-early, sparse-late** schedule.
 
 ### Probing phase
@@ -56,6 +57,7 @@ More concretely:
 ### Classification phase
 
 - Scores are compared against calibrated thresholds.
+- The full raw score tensor is preserved in results files; the categorical label is a summary layer rather than the only retained representation.
 - Each head is assigned one of six labels:
 
 $$
@@ -616,6 +618,18 @@ $$
 
 This quantifies stability versus re-specialization.
 
+### 8.4 Mixed behavior and label compression
+
+The dominant-label view is intentionally lossy. A head can exceed threshold for multiple behaviors at once, yet still receive a single categorical label because the classifier chooses the largest threshold-normalized score when there is a clear winner.
+
+This means:
+
+- `UNDIFFERENTIATED` includes both weak heads and ambiguous near-ties
+- a head labeled `PREV_TOKEN` can still have substantial `SINK` or `SEMANTIC` signal
+- dominant labels are useful for visualization, but raw scores and threshold-presence analyses are often needed to interpret behavioral overlap
+
+In current comparison runs, this distinction is empirically important: many heads exceed thresholds for multiple behaviors simultaneously even when one dominant label accounts for the final trajectory summary.
+
 ---
 
 ## 9. Hypothesis Tests
@@ -642,6 +656,8 @@ $$
 
 where undefined onset for another type is treated as “not earlier than sink”
 
+Current status: this is an evaluated hypothesis, not a settled result. Recent single-seed comparison runs do not support a strong sink-first claim.
+
 ### H2. Ordered development
 
 Canonical wording:
@@ -667,6 +683,8 @@ $$
 t_{\mathrm{sink}} \le t_{\mathrm{prev}} < t_{\mathrm{ind}} < t_{\mathrm{sem}}.
 $$
 
+Current status: this ordering is best treated as a hypothesis under test. Recent single-seed comparison runs do not robustly support it.
+
 ### H3. Layer stratification
 
 Canonical wording:
@@ -678,6 +696,8 @@ Operationally:
 - compute non-undifferentiated fraction per layer over time
 - define layer onset as the first checkpoint where the layer reaches at least 50% specialized heads
 - test whether layer onset is non-decreasing with layer depth
+
+Current status: this remains open. Some runs show lower-layer activity earlier, but stronger multi-seed evidence is still needed before making a strong claim.
 
 ### H4. Phase transition
 
@@ -692,6 +712,8 @@ Operationally:
 - measure discontinuity score from the induction-count slope profile
 - check for a nearby validation-loss inflection around the induction crossing
 
+Current status: this remains open. Weak or rare induction in the current comparison runs limits how strong a phase-transition claim can be.
+
 ### H5. Sink persistence
 
 Canonical wording:
@@ -703,6 +725,8 @@ Operationally:
 - count transitions out of sink state
 - compute sink persistence for every head ever labeled `SINK`
 - compare sink stability with overall type-change behavior
+
+Current status: still under evaluation. Because dominant `SINK` labels are rare in current comparison runs, persistence evidence is not yet strong.
 
 ---
 
@@ -734,7 +758,8 @@ When reading results:
 
 - A high score means a head exhibits a behavior strongly on the fixed probe set.
 - A high **normalized** score means that behavior is strong relative to its random baseline.
-- A head can remain undifferentiated either because it is genuinely mixed or because no behavior rises clearly above threshold.
+- A head can remain undifferentiated either because it is genuinely weak or because multiple behaviors are too close to separate cleanly.
+- A dominant label should be read as the strongest currently expressed behavior, not the head's full identity.
 - Onset times are operational definitions, not metaphysical truths.
 
 This project therefore measures:

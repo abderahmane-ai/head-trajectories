@@ -265,12 +265,12 @@ https://github.com/abderahmane-ai/head-trajectories
 ```
 [R] Developmental Trajectories of Attention Heads - Open Source Research Code
 
-I'm sharing my research codebase for studying attention head development in transformers. The project tracks 64 heads across 100 checkpoints to understand their developmental trajectories.
+I'm sharing my research codebase for studying attention head development in transformers. The project tracks attention heads across profile-specific checkpoints to understand their developmental trajectories.
 
 Key features:
 - Complete transformer implementation from scratch
 - Five behavioral scoring functions
-- Comprehensive test suite (60 tests)
+- Comprehensive test suite
 - Full documentation and guides
 - Reproducible experiments (~$25 on Modal)
 

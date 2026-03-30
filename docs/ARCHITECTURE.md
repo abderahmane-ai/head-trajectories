@@ -13,7 +13,7 @@ head-trajectories/
 │   └── rmsnorm.py      # RMS normalization
 │
 ├── data/               # Data loading and preprocessing
-│   ├── loader.py       # OpenWebText streaming
+│   ├── loader.py       # Streaming text loader for long OpenWebText runs
 │   ├── probe.py        # Probe dataset construction
 │   └── calibration.py  # Threshold calibration
 │
@@ -61,10 +61,10 @@ head-trajectories/
 
 ### Training Phase
 ```
-OpenWebText → Tokenization → Batching → Model → Loss → Optimizer
-                                          ↓
-                                    Checkpoints
-                                    (100 per run)
+Dataset/Profile → Tokenization → Batching → Model → Loss → Optimizer
+                                                ↓
+                                          Checkpoints
+                                      (profile-specific)
 ```
 
 ### Probing Phase
@@ -98,16 +98,16 @@ Results.pt → Compute Trajectories → Generate Figures → Hypothesis Tests
 - UNDIFFERENTIATED fallback
 
 ### 4. Checkpoint Schedule
-- Dense early: 50-step intervals for first 500 steps
-- Sparse late: 2000-step intervals after 50k steps
-- Total: ~100 checkpoints per run
+- Profile-specific, but always dense early relative to late
+- Short comparison profiles save 14 checkpoints over 12k steps
+- Long OpenWebText profiles save many more checkpoints over 100k steps
 - Optimizes for early developmental dynamics
 
 ### 5. Probe Dataset
 - Immutable after construction
 - Held-out from training data
 - Three types: general, induction, positional
-- Saved once, reused for all runs
+- Saved once per profile / calibration version, then reused across checkpoints for that run configuration
 
 ## Module Dependencies
 
@@ -200,7 +200,7 @@ visualization/
 - Analysis: deterministic (no randomness)
 
 ### Immutable Data
-- Probe dataset never regenerated after first run
+- Probe dataset is fixed after construction for a given profile and calibration version
 - Checkpoints never modified after saving
 - Results files append-only (with resumption)
 

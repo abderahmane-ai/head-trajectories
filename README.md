@@ -8,19 +8,17 @@
 
 Most interpretability work asks *what* attention heads do after training. This project asks *when* they become what they are. We train transformers from scratch with dense checkpointing, probe every head at every checkpoint, and track developmental trajectories from initialization to convergence.
 
-**Current evidence:** Results so far suggest an ordered developmental pathway: architectural `positional (RoPE)` structure appears at initialization, and learned specialization often proceeds through `sink → prev-token → induction → semantic`.
+**Current evidence:** The pipeline is stable, but the strongest current empirical result is more modest than the original hypothesis framing: final head-type mixes are dataset-sensitive, `PREV_TOKEN` is usually the clearest dominant learned behavior, `SEMANTIC` can appear early and remains calibration-sensitive, and many heads exhibit mixed behaviors in raw scores even when the classifier assigns a single dominant label.
 
 ## Quick Start
 
 ```bash
 # Install
 pip install -r requirements.txt
-python run_tests.py  # suite currently has 83 tests; local temp-dir behavior may vary by environment
+python run_tests.py  # exact test count changes over time
 
-# Run full pipeline (requires Modal account for training)
-modal run modal_jobs/train_seed42.py        # ~5h on A100, $6
-python run_probing.py --seed 42             # ~10min on CPU
-python run_analysis.py                      # generates figures/
+# Run a profile-driven experiment locally or in the notebook
+python run_single_experiment.py --profile wikitext103_15m_preliminary --seed 42
 ```
 
 See [docs/QUICKSTART.md](docs/QUICKSTART.md) for detailed setup.
@@ -28,7 +26,7 @@ Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 
 ## Method
 
-**Training:** 15M parameter LLaMA-style transformers on OpenWebText with 100 checkpoints per run (dense early: every 50 steps for first 500 steps, sparse late: every 2000 steps after 50K).
+**Training:** Profile-driven decoder-only transformer runs. The repository currently supports notebook-scale comparison runs on WikiText-103 and LM1B, plus longer OpenWebText runs. Checkpoint schedules are profile-specific, but all keep a dense-early emphasis.
 
 **Probing:** Fixed held-out dataset with three probe types:
 - General sequences (real text)
@@ -42,31 +40,33 @@ Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 - **POSITIONAL**: Content-invariant attention (KL divergence)
 - **SEMANTIC**: Alignment with embedding similarity (masked)
 
-**Classification:** Thresholds are calibrated from a causally scrambled random baseline. `SINK`, `PREV_TOKEN`, `INDUCTION`, and `POSITIONAL` use `mean + 2σ`; `SEMANTIC` uses the null `p99` because its per-head null variance collapses after averaging. Heads are classified by `argmax(scores / thresholds)` with defensive threshold sanitization only as a fallback for pathological calibrations.
+**Classification:** Thresholds are calibrated from a causally scrambled random baseline. `SINK`, `PREV_TOKEN`, `INDUCTION`, and `POSITIONAL` use `mean + 2σ`; `SEMANTIC` uses the null `p99` because its per-head null variance collapses after averaging. Heads are classified by `argmax(scores / thresholds)` with a conservative tie tolerance, and the raw score tensor is preserved so mixed behaviors are not lost analytically.
 
 See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 
 ## Results
 
-**H1 (Sink-First Among Learned Types):** Learned sink onset occurs no later than other learned types in current runs  
-**H2 (Learned Ordered Development):** Current evidence suggests `SINK ≤ PREV_TOKEN < INDUCTION < SEMANTIC` once architectural positional initialization is separated out  
-**H3 (Layer Stratification):** Lower layers reach specialization earlier than higher layers in current runs  
-**H4 (Induction Phase Transition):** Induction emergence appears abrupt rather than gradual in some runs and scales  
-**H5 (Sink Persistence):** Heads that become sinks usually remain sinks for most subsequent checkpoints
+The repository evaluates five canonical hypotheses:
 
-**Working finding:** The `SINK → PREV_TOKEN` pathway appears repeatedly in preliminary analyses. Heads may learn fixed-position anchoring before dynamic relative tracking, but that should be treated as an evidence-backed hypothesis rather than a settled law until larger runs and sensitivity checks are complete.
+**H1 (Sink-First Among Learned Types):** Learned sink onset occurs no later than other learned types  
+**H2 (Learned Ordered Development):** `SINK ≤ PREV_TOKEN < INDUCTION < SEMANTIC` after separating architectural positional initialization  
+**H3 (Layer Stratification):** Lower layers reach specialization earlier than higher layers  
+**H4 (Induction Phase Transition):** Induction emergence is abrupt rather than gradual  
+**H5 (Sink Persistence):** Heads that become sinks remain sinks for most subsequent checkpoints
+
+**Current status:** Single-seed comparison runs do **not** support strong `H1` or `H2` claims. The clearest current result is that final behavioral mixes differ substantially across datasets, especially in the balance between `PREV_TOKEN` and `SEMANTIC`. Raw scores also show widespread mixed-behavior heads, so dominant labels should be read as summaries rather than full identities.
 
 ## Repository Structure
 
 ```
 ├── model/              Transformer implementation (RoPE, RMSNorm, SwiGLU)
-├── data/               Probe construction + OpenWebText streaming
+├── data/               Probe construction + threshold calibration
 ├── training/           Training loop with checkpoint schedule
 ├── probing/            Attention extraction + 5 scoring functions
 ├── analysis/           Trajectory analysis + hypothesis tests
 ├── visualization/      Figure generation (300 DPI)
 ├── modal_jobs/         Cloud training scripts (4 runs)
-├── tests/              83 unit tests
+├── tests/              Unit and integration tests
 └── docs/               Full documentation
 ```
 
@@ -79,11 +79,11 @@ See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 
 ## Compute Requirements
 
-**Training:** 4 runs × 5h on A100 = ~$22 total (Modal)  
-**Probing:** CPU only, ~10min per run  
+**Training:** Depends on profile. Notebook-scale 12k-step runs are roughly ~1 hour on an A100-class GPU; 100k-step OpenWebText runs are several hours.  
+**Probing:** CPU only, typically minutes per run depending on profile  
 **Analysis:** CPU only, <1min
 
-Total cost to reproduce: **~$25**
+Total cost to reproduce depends on which profiles and how many seeds you run.
 
 ## Documentation
 
