@@ -67,6 +67,7 @@ figures/
 *.jpg
 *.pdf
 run_exports/
+docs/outreach/
 
 # Logs
 *.log
