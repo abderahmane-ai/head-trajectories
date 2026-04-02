@@ -26,6 +26,7 @@ Output figures:
 
 import argparse
 import time
+import numpy as np
 import torch
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -37,6 +38,8 @@ from analysis import (
     compute_head_trajectories,
     find_interesting_trajectories,
     compute_specialization_onset,
+    compute_onset_bootstrap_cis,
+    compute_mixed_behavior_summary,
     print_trajectory_report,
     compute_type_change_matrix,
     compute_sink_persistence,
@@ -204,17 +207,26 @@ def main() -> None:
         global_curves,
         threshold_frac=0.05,
     )
+    onset_cis = compute_onset_bootstrap_cis(
+        primary_results,
+        threshold_frac=0.05,
+        n_bootstraps=1000,
+        random_seed=0,
+    )
     learned_onset_steps = compute_specialization_onset(
         global_curves,
         threshold_frac=0.05,
         exclude_positional_init=True,
     )
+    mixed_behavior = compute_mixed_behavior_summary(primary_results)
 
     print_trajectory_report(
         global_curves,
         per_layer_curves,
         onset_steps,
         learned_onset_steps=learned_onset_steps,
+        onset_cis=onset_cis,
+        mixed_behavior=mixed_behavior,
         seed=primary_results[0]["seed"],
     )
 
@@ -325,6 +337,18 @@ def main() -> None:
         induction_curve, crossing_steps,
         inflection_10, inflection_25, discontinuity,
     )
+
+    natural_induction_tensors = [
+        r.get("natural_induction_score_tensor")
+        for r in primary_results
+        if r.get("natural_induction_score_tensor") is not None
+    ]
+    if natural_induction_tensors:
+        final_natural_scores = [
+            float(np.asarray(tensor[-1]).mean())
+            for tensor in natural_induction_tensors
+        ]
+        print(f"  Natural induction (final mean raw score): {np.mean(final_natural_scores):.4f}")
 
     # Figure 3: phase transition dual-axis plot
     plot_phase_transition(

@@ -1,6 +1,6 @@
 import torch
 
-from probing.scores import induction_score
+from probing.scores import induction_score, natural_induction_score
 
 def test_perfect_induction():
     N = 10
@@ -76,6 +76,23 @@ def test_perfect_induction():
     assert abs(partial_score - 0.5) < 0.05, f"Expected ~0.5, got {partial_score}"
     
     print("SUCCESS: induction_score perfectly detects induction head behavior!")
+
+
+def test_natural_induction_score_matches_core_metric():
+    N = 4
+    T = 32
+    induction_p1 = torch.tensor([4, 5, 6, 7], dtype=torch.long)
+    induction_p2 = torch.tensor([16, 17, 18, 19], dtype=torch.long)
+    attn_head = torch.zeros(N, T, T)
+    for t in range(T):
+        attn_head[:, t, :t + 1] = 1.0 / (t + 1)
+    for i in range(N):
+        attn_head[i, induction_p2[i], :] = 0.0
+        attn_head[i, induction_p2[i], induction_p1[i] + 1] = 1.0
+
+    assert natural_induction_score(attn_head, induction_p1, induction_p2) == induction_score(
+        attn_head, induction_p1, induction_p2
+    )
 
 if __name__ == "__main__":
     test_perfect_induction()

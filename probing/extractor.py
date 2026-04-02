@@ -131,7 +131,8 @@ class CheckpointExtraction:
         train_loss:         training loss at this checkpoint
         val_loss:           validation loss at this checkpoint
         general_maps:       List[(500, n_heads, T, T)] per layer  — general seqs
-        induction_maps:     List[(100, n_heads, T, T)] per layer  — induction seqs
+        induction_maps:     List[(100, n_heads, T, T)] per layer  — synthetic induction seqs
+        natural_induction_maps: Optional[List[(100, n_heads, T, T)]] per layer
         positional_maps:    List[(100, n_heads, T, T)] per layer  — positional seqs
         embedding_matrix:   (vocab_size, d_model) — model's current embeddings
         general_token_ids:  (500, T) — token ids for semantic score computation
@@ -145,6 +146,7 @@ class CheckpointExtraction:
         val_loss:         float,
         general_maps:     List[torch.Tensor],
         induction_maps:   List[torch.Tensor],
+        natural_induction_maps: Optional[List[torch.Tensor]],
         positional_maps:  List[torch.Tensor],
         embedding_matrix: torch.Tensor,
         general_token_ids: torch.Tensor,
@@ -155,6 +157,7 @@ class CheckpointExtraction:
         self.val_loss         = val_loss
         self.general_maps     = general_maps
         self.induction_maps   = induction_maps
+        self.natural_induction_maps = natural_induction_maps
         self.positional_maps  = positional_maps
         self.embedding_matrix = embedding_matrix
         self.general_token_ids = general_token_ids
@@ -198,10 +201,19 @@ def extract_checkpoint(
     general_seqs    = probe_dict["general_seqs"]    # (500, 256)
     induction_seqs  = probe_dict["induction_seqs"]  # (100, 256)
     positional_seqs = probe_dict["positional_seqs"] # (100, 256)
+    natural_induction_seqs = probe_dict.get("natural_induction_seqs")
 
     general_maps    = extract_attention_maps(model, general_seqs,    device, batch_size)
     induction_maps  = extract_attention_maps(model, induction_seqs,  device, batch_size)
     positional_maps = extract_attention_maps(model, positional_seqs, device, batch_size)
+    natural_induction_maps = None
+    if natural_induction_seqs is not None:
+        natural_induction_maps = extract_attention_maps(
+            model,
+            natural_induction_seqs,
+            device,
+            batch_size,
+        )
 
     # Get current embedding matrix — critical: must be from THIS checkpoint
     embedding_matrix = model.get_embedding_matrix()   # (vocab_size, d_model)
@@ -212,6 +224,7 @@ def extract_checkpoint(
         val_loss=val_loss,
         general_maps=general_maps,
         induction_maps=induction_maps,
+        natural_induction_maps=natural_induction_maps,
         positional_maps=positional_maps,
         embedding_matrix=embedding_matrix,
         general_token_ids=general_seqs,

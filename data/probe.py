@@ -11,12 +11,18 @@ Probe dataset structure:
   induction_seqs:     (100, 256) int64  — sequences with engineered repeats
   induction_p1:       (100,)     int64  — start index of first occurrence
   induction_p2:       (100,)     int64  — start index of second occurrence
+  natural_induction_seqs: (100, 256) int64 — naturally repeated subsequence probes
+  natural_induction_p1:   (100,)     int64 — first natural occurrence start
+  natural_induction_p2:   (100,)     int64 — second natural occurrence start
   positional_seqs:    (100, 256) int64  — 50 pairs, stored as flat (100, 256)
   positional_pairs:   (50, 2)    int64  — row indices into positional_seqs
   heldout_general_seqs:   (100, 256) int64  — heldout general sequences
   heldout_induction_seqs: (20, 256)  int64  — heldout induction sequences
   heldout_induction_p1:   (20,)      int64  — heldout induction p1
   heldout_induction_p2:   (20,)      int64  — heldout induction p2
+  heldout_natural_induction_seqs: (20, 256) int64 — heldout natural induction probes
+  heldout_natural_induction_p1:   (20,)      int64 — heldout natural p1
+  heldout_natural_induction_p2:   (20,)      int64 — heldout natural p2
   heldout_positional_seqs:(20, 256)  int64  — heldout positional sequences
   heldout_positional_pairs:(10, 2)   int64  — heldout positional pairs
   calibrated_thresholds_15m: (5,) float32 — mean random-baseline thresholds (15M)
@@ -28,6 +34,9 @@ Probe dataset structure:
   calibrated_thresholds_15m_metric_p99: (S, 5) float32 — per-seed raw metric p99
   calibrated_thresholds_15m_nonpositive_mask: (S, 5) bool — thresholds <= 0 per seed
   calibrated_thresholds_15m_requires_sanitization: scalar bool — any non-positive threshold seen
+  calibrated_thresholds_15m_null_scores: (S, 64, 5) float32 — per-seed headwise null scores
+  calibrated_thresholds_15m_null_scores_pooled: (S*64, 5) float32 — pooled null scores
+  calibrated_thresholds_15m_null_seed_list: (S,) int64 — calibration seeds used for null scores
   calibrated_thresholds_6m:  (5,) float32 — mean random-baseline thresholds (6M)
   calibrated_thresholds_6m_std: (5,) float32 — across calibration seeds
   calibrated_thresholds_6m_seeds: (S, 5) float32 — per-seed thresholds
@@ -37,6 +46,9 @@ Probe dataset structure:
   calibrated_thresholds_6m_metric_p99: (S, 5) float32 — per-seed raw metric p99
   calibrated_thresholds_6m_nonpositive_mask: (S, 5) bool — thresholds <= 0 per seed
   calibrated_thresholds_6m_requires_sanitization: scalar bool — any non-positive threshold seen
+  calibrated_thresholds_6m_null_scores: (S, 48, 5) float32 — per-seed headwise null scores
+  calibrated_thresholds_6m_null_scores_pooled: (S*48, 5) float32 — pooled null scores
+  calibrated_thresholds_6m_null_seed_list: (S,) int64 — calibration seeds used for null scores
   calibration_seeds:  (S,) int64  — seeds used for calibration
   calibration_version: scalar int  — threshold-calibration schema version
   creation_seed:      scalar int        — always 0
@@ -167,6 +179,101 @@ def build_induction_probes(
     )
 
 
+def _find_natural_repeat(
+    tokens: List[int],
+    subseq_len_range: Tuple[int, int],
+    min_distance: int,
+    block_size: int,
+    rng: random.Random,
+) -> Optional[Tuple[List[int], int, int]]:
+    """Find a naturally repeated subsequence in a real sequence."""
+
+    if len(tokens) < block_size:
+        return None
+
+    trimmed = tokens[:block_size]
+    min_len, max_len = subseq_len_range
+    lengths = list(range(max_len, min_len - 1, -1))
+    rng.shuffle(lengths)
+
+    for subseq_len in lengths:
+        seen: Dict[Tuple[int, ...], int] = {}
+        candidates: List[Tuple[int, int]] = []
+        max_start = block_size - subseq_len
+        for start in range(max_start + 1):
+            key = tuple(trimmed[start : start + subseq_len])
+            if key in seen:
+                prev_start = seen[key]
+                if start - prev_start >= min_distance:
+                    candidates.append((prev_start, start))
+            else:
+                seen[key] = start
+        if candidates:
+            p1, p2 = rng.choice(candidates)
+            return trimmed, p1, p2
+
+    return None
+
+
+def build_natural_induction_probes(
+    raw_sequences: List[List[int]],
+    n_probes: int = 100,
+    subseq_len_range: Tuple[int, int] = (5, 10),
+    min_distance: int = 20,
+    block_size: int = 256,
+    seed: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Build induction probes from naturally occurring repeated subsequences.
+
+    Returns:
+        natural_induction_seqs: (n_probes, block_size) int64
+        natural_induction_p1:   (n_probes,) int64
+        natural_induction_p2:   (n_probes,) int64
+    """
+
+    rng = random.Random(seed + 3000)
+    seqs: List[List[int]] = []
+    p1s: List[int] = []
+    p2s: List[int] = []
+    attempts = 0
+
+    for base in raw_sequences:
+        attempts += 1
+        result = _find_natural_repeat(
+            base,
+            subseq_len_range=subseq_len_range,
+            min_distance=min_distance,
+            block_size=block_size,
+            rng=rng,
+        )
+        if result is None:
+            continue
+        tokens, p1, p2 = result
+        seqs.append(tokens)
+        p1s.append(p1)
+        p2s.append(p2)
+        if len(seqs) >= n_probes:
+            break
+
+    if len(seqs) < n_probes:
+        raise RuntimeError(
+            f"Only built {len(seqs)}/{n_probes} natural induction probes "
+            f"from {attempts} candidate sequences."
+        )
+
+    print(
+        f"  Natural induction probes: built {n_probes} from {attempts} candidates "
+        f"(success rate: {n_probes / attempts * 100:.1f}%)"
+    )
+
+    return (
+        torch.tensor(seqs, dtype=torch.long),
+        torch.tensor(p1s, dtype=torch.long),
+        torch.tensor(p2s, dtype=torch.long),
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Positional Probe Construction
 # ─────────────────────────────────────────────────────────────────────────────
@@ -278,6 +385,8 @@ def build_probe_dataset(
     n_induction_holdout: int = 20,
     n_pairs_holdout:     int = 10,
     n_calibration_seeds: int = 3,
+    n_natural_induction: Optional[int] = None,
+    n_natural_induction_holdout: Optional[int] = None,
 ) -> Dict[str, torch.Tensor]:
     """
     Construct the full probe dataset and save to output_path.
@@ -297,6 +406,8 @@ def build_probe_dataset(
         n_induction_holdout: heldout induction probe sequences
         n_pairs_holdout:     heldout positional probe pairs
         n_calibration_seeds: number of random seeds for calibration
+        n_natural_induction: number of natural induction probes; defaults to n_induction
+        n_natural_induction_holdout: heldout natural induction probes; defaults to n_induction_holdout
 
     Returns:
         probe_dict: dictionary of all probe tensors (also saved to disk)
@@ -320,6 +431,10 @@ def build_probe_dataset(
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if n_natural_induction is None:
+        n_natural_induction = n_induction
+    if n_natural_induction_holdout is None:
+        n_natural_induction_holdout = n_induction_holdout
 
     # Load raw sequences from the probe split of OpenWebText
     print("  [1/4] Loading probe split sequences from OpenWebText...")
@@ -333,17 +448,24 @@ def build_probe_dataset(
     # We need n_general + n_induction + 2*n_pairs sequences (with headroom)
     general_pool_size = n_general * 2
     induction_pool_size = n_induction * 3
+    natural_induction_pool_size = max(n_natural_induction * 8, n_natural_induction)
     positional_pool_size = n_pairs * 4
     general_holdout_pool_size = n_general_holdout * 2
     induction_holdout_pool_size = n_induction_holdout * 3
+    natural_induction_holdout_pool_size = max(
+        n_natural_induction_holdout * 8,
+        n_natural_induction_holdout,
+    )
     positional_holdout_pool_size = n_pairs_holdout * 4
 
     n_needed = (
         general_pool_size
         + induction_pool_size
+        + natural_induction_pool_size
         + positional_pool_size
         + general_holdout_pool_size
         + induction_holdout_pool_size
+        + natural_induction_holdout_pool_size
         + positional_holdout_pool_size
     )
     raw_sequences = stream.get_raw_tokens(n_needed)
@@ -359,12 +481,18 @@ def build_probe_dataset(
     offset += general_pool_size
     pool_induction = raw_sequences[offset : offset + induction_pool_size]
     offset += induction_pool_size
+    pool_natural_induction = raw_sequences[offset : offset + natural_induction_pool_size]
+    offset += natural_induction_pool_size
     pool_positional = raw_sequences[offset : offset + positional_pool_size]
     offset += positional_pool_size
     pool_general_holdout = raw_sequences[offset : offset + general_holdout_pool_size]
     offset += general_holdout_pool_size
     pool_induction_holdout = raw_sequences[offset : offset + induction_holdout_pool_size]
     offset += induction_holdout_pool_size
+    pool_natural_induction_holdout = raw_sequences[
+        offset : offset + natural_induction_holdout_pool_size
+    ]
+    offset += natural_induction_holdout_pool_size
     pool_positional_holdout = raw_sequences[offset : offset + positional_holdout_pool_size]
 
     # Build sub-probes
@@ -376,7 +504,19 @@ def build_probe_dataset(
         pool_induction, n_induction, (5, 10), block_size, seed
     )
 
-    print("\n  [4/6] Building positional probe sequences...")
+    print("\n  [4/6] Building natural induction probe sequences...")
+    natural_induction_seqs, natural_induction_p1, natural_induction_p2 = (
+        build_natural_induction_probes(
+            pool_natural_induction,
+            n_natural_induction,
+            (5, 10),
+            20,
+            block_size,
+            seed,
+        )
+    )
+
+    print("\n  [5/6] Building positional probe sequences...")
     positional_seqs, positional_pairs = build_positional_probes(
         pool_positional, n_pairs, block_size, seed
     )
@@ -386,10 +526,18 @@ def build_probe_dataset(
     heldout_induction_seqs = None
     heldout_induction_p1 = None
     heldout_induction_p2 = None
+    heldout_natural_induction_seqs = None
+    heldout_natural_induction_p1 = None
+    heldout_natural_induction_p2 = None
     heldout_positional_seqs = None
     heldout_positional_pairs = None
-    if n_general_holdout > 0 or n_induction_holdout > 0 or n_pairs_holdout > 0:
-        print("\n  [5/6] Building heldout probe sequences...")
+    if (
+        n_general_holdout > 0
+        or n_induction_holdout > 0
+        or n_natural_induction_holdout > 0
+        or n_pairs_holdout > 0
+    ):
+        print("\n  [6/7] Building heldout probe sequences...")
         heldout_seed = seed + 5000
         if n_general_holdout > 0:
             heldout_general_seqs = build_general_probes(
@@ -401,6 +549,19 @@ def build_probe_dataset(
                     pool_induction_holdout, n_induction_holdout, (5, 10),
                     block_size, heldout_seed
                 )
+            )
+        if n_natural_induction_holdout > 0:
+            (
+                heldout_natural_induction_seqs,
+                heldout_natural_induction_p1,
+                heldout_natural_induction_p2,
+            ) = build_natural_induction_probes(
+                pool_natural_induction_holdout,
+                n_natural_induction_holdout,
+                (5, 10),
+                20,
+                block_size,
+                heldout_seed,
             )
         if n_pairs_holdout > 0:
             heldout_positional_seqs, heldout_positional_pairs = (
@@ -415,6 +576,9 @@ def build_probe_dataset(
         "induction_seqs":    induction_seqs,      # (100, 256)
         "induction_p1":      induction_p1,        # (100,)
         "induction_p2":      induction_p2,        # (100,)
+        "natural_induction_seqs": natural_induction_seqs,
+        "natural_induction_p1": natural_induction_p1,
+        "natural_induction_p2": natural_induction_p2,
         "positional_seqs":   positional_seqs,     # (100, 256)
         "positional_pairs":  positional_pairs,    # (50, 2)
         "calibration_version": torch.tensor(CALIBRATION_VERSION, dtype=torch.long),
@@ -423,7 +587,7 @@ def build_probe_dataset(
     }
 
     # Calibrate thresholds from random baseline (15M + 6M)
-    print("\n  [6/6] Calibrating random-baseline thresholds...")
+    print("\n  [7/7] Calibrating random-baseline thresholds...")
     (
         thresholds_15m,
         thresholds_15m_std,
@@ -486,6 +650,15 @@ def build_probe_dataset(
     probe_dict["calibrated_thresholds_15m_requires_sanitization"] = torch.tensor(
         thresholds_15m_diag["requires_sanitization"], dtype=torch.bool
     )
+    probe_dict["calibrated_thresholds_15m_null_scores"] = torch.tensor(
+        thresholds_15m_diag["per_seed_null_scores"], dtype=torch.float32
+    )
+    probe_dict["calibrated_thresholds_15m_null_scores_pooled"] = torch.tensor(
+        thresholds_15m_diag["pooled_null_scores"], dtype=torch.float32
+    )
+    probe_dict["calibrated_thresholds_15m_null_seed_list"] = torch.tensor(
+        thresholds_15m_diag["null_seed_list"], dtype=torch.long
+    )
     probe_dict["calibrated_thresholds_6m"] = torch.tensor(
         thresholds_6m, dtype=torch.float32
     )
@@ -513,6 +686,15 @@ def build_probe_dataset(
     probe_dict["calibrated_thresholds_6m_requires_sanitization"] = torch.tensor(
         thresholds_6m_diag["requires_sanitization"], dtype=torch.bool
     )
+    probe_dict["calibrated_thresholds_6m_null_scores"] = torch.tensor(
+        thresholds_6m_diag["per_seed_null_scores"], dtype=torch.float32
+    )
+    probe_dict["calibrated_thresholds_6m_null_scores_pooled"] = torch.tensor(
+        thresholds_6m_diag["pooled_null_scores"], dtype=torch.float32
+    )
+    probe_dict["calibrated_thresholds_6m_null_seed_list"] = torch.tensor(
+        thresholds_6m_diag["null_seed_list"], dtype=torch.long
+    )
     probe_dict["calibration_seeds"] = calibration_seeds
 
     # Add heldout probes if constructed
@@ -522,6 +704,10 @@ def build_probe_dataset(
         probe_dict["heldout_induction_seqs"] = heldout_induction_seqs
         probe_dict["heldout_induction_p1"] = heldout_induction_p1
         probe_dict["heldout_induction_p2"] = heldout_induction_p2
+    if heldout_natural_induction_seqs is not None:
+        probe_dict["heldout_natural_induction_seqs"] = heldout_natural_induction_seqs
+        probe_dict["heldout_natural_induction_p1"] = heldout_natural_induction_p1
+        probe_dict["heldout_natural_induction_p2"] = heldout_natural_induction_p2
     if heldout_positional_seqs is not None:
         probe_dict["heldout_positional_seqs"] = heldout_positional_seqs
         probe_dict["heldout_positional_pairs"] = heldout_positional_pairs
@@ -538,6 +724,7 @@ def build_probe_dataset(
     print(f"  induction_seqs    : {induction_seqs.shape}")
     print(f"  induction_p1      : {induction_p1.shape}")
     print(f"  induction_p2      : {induction_p2.shape}")
+    print(f"  natural_induction : {natural_induction_seqs.shape}")
     print(f"  positional_seqs   : {positional_seqs.shape}")
     print(f"  positional_pairs  : {positional_pairs.shape}")
     if heldout_general_seqs is not None:
@@ -546,6 +733,10 @@ def build_probe_dataset(
         print(f"  heldout_induction : {heldout_induction_seqs.shape}")
         print(f"  heldout_p1        : {heldout_induction_p1.shape}")
         print(f"  heldout_p2        : {heldout_induction_p2.shape}")
+    if heldout_natural_induction_seqs is not None:
+        print(f"  heldout_natural   : {heldout_natural_induction_seqs.shape}")
+        print(f"  heldout_nat_p1    : {heldout_natural_induction_p1.shape}")
+        print(f"  heldout_nat_p2    : {heldout_natural_induction_p2.shape}")
     if heldout_positional_seqs is not None:
         print(f"  heldout_positional: {heldout_positional_seqs.shape}")
         print(f"  heldout_pairs     : {heldout_positional_pairs.shape}")
@@ -571,6 +762,7 @@ def load_probe_dataset(path: Path) -> Dict[str, torch.Tensor]:
 
     required_keys = {
         "general_seqs", "induction_seqs", "induction_p1", "induction_p2",
+        "natural_induction_seqs", "natural_induction_p1", "natural_induction_p2",
         "positional_seqs", "positional_pairs", "creation_seed", "block_size",
     }
 
@@ -654,3 +846,38 @@ def verify_induction_probes(probe_dict: Dict[str, torch.Tensor]) -> None:
     else:
         print(f"  [OK] Probe dataset integrity confirmed.")
     print()
+
+    if {
+        "natural_induction_seqs",
+        "natural_induction_p1",
+        "natural_induction_p2",
+    }.issubset(probe_dict.keys()):
+        nat_seqs = probe_dict["natural_induction_seqs"]
+        nat_p1s = probe_dict["natural_induction_p1"]
+        nat_p2s = probe_dict["natural_induction_p2"]
+        nat_correct = 0
+        nat_total = nat_seqs.shape[0]
+
+        for i in range(nat_total):
+            p1 = nat_p1s[i].item()
+            p2 = nat_p2s[i].item()
+            seq = nat_seqs[i]
+            match_len = 0
+            for offset in range(5):
+                if p1 + offset < 256 and p2 + offset < 256:
+                    if seq[p1 + offset] == seq[p2 + offset]:
+                        match_len += 1
+                    else:
+                        break
+            if match_len >= 5:
+                nat_correct += 1
+
+        print(f"  Natural induction verification:")
+        print(f"  {'─' * 40}")
+        print(f"  Probes with valid repeats : {nat_correct:3d} / {nat_total}")
+        print(f"  Success rate              : {nat_correct / nat_total * 100:.1f}%")
+        if nat_correct < nat_total * 0.95:
+            print(f"  [WARNING] Less than 95% natural probes verified — consider rebuilding.")
+        else:
+            print(f"  [OK] Natural induction probe integrity confirmed.")
+        print()

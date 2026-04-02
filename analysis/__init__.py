@@ -7,6 +7,8 @@ from .trajectories import (
     compute_head_trajectories,
     find_interesting_trajectories,
     compute_specialization_onset,
+    compute_onset_bootstrap_cis,
+    compute_mixed_behavior_summary,
     print_trajectory_report,
 )
 from .stability import (
@@ -39,6 +41,8 @@ __all__ = [
     "compute_head_trajectories",
     "find_interesting_trajectories",
     "compute_specialization_onset",
+    "compute_onset_bootstrap_cis",
+    "compute_mixed_behavior_summary",
     "print_trajectory_report",
     "compute_type_change_matrix",
     "compute_sink_persistence",

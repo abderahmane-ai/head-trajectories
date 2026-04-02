@@ -5,19 +5,20 @@ Converts the 5 raw scores per head into a discrete type label using
 threshold normalization and argmax, with tie-breaking logic and
 logging of ambiguous classifications to ties.csv.
 
-Head type labels:
-    0 = UNDIFFERENTIATED
-    1 = SINK
-    2 = PREV_TOKEN
-    3 = INDUCTION
-    4 = POSITIONAL
-    5 = SEMANTIC
+The dominant label remains the primary categorical summary, but we also
+retain mixed-behavior metadata:
+  - threshold flags
+  - normalized scores
+  - runner-up behavior
+  - dominant margin
+  - number of behaviors above threshold
 """
 
 import csv
 import warnings
 import numpy as np
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -52,6 +53,7 @@ THRESHOLDS: np.ndarray = np.array([0.4, 0.5, 0.3, 0.7, 0.3], dtype=np.float32)
 # assign UNDIFFERENTIATED and log the tie
 TIE_TOLERANCE: float = 0.05
 THRESHOLD_EPSILON: float = 1e-6
+LABEL_SCHEMA_VERSION: int = 2
 
 LABEL_UNDIFF: int = 0
 LABEL_SINK:   int = 1
@@ -59,6 +61,20 @@ LABEL_PREV:   int = 2
 LABEL_IND:    int = 3
 LABEL_POS:    int = 4
 LABEL_SEM:    int = 5
+
+BEHAVIOR_NAMES: List[str] = HEAD_TYPES[1:]
+
+
+@dataclass(frozen=True)
+class ClassificationResult:
+    label: int
+    is_tie: bool
+    threshold_flags: np.ndarray
+    normalized_scores: np.ndarray
+    primary_behavior: int
+    runner_up_behavior: int
+    dominant_margin: float
+    n_behaviors_above_threshold: int
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -103,11 +119,11 @@ def prepare_thresholds(
 
     return raw, effective, sanitization_mask, was_sanitized
 
-def classify_head(
+def classify_head_details(
     scores:           Tuple[float, float, float, float, float],
     thresholds:       np.ndarray = THRESHOLDS,
     tie_tolerance:    float      = TIE_TOLERANCE,
-) -> Tuple[int, bool]:
+) -> ClassificationResult:
     """
     Classify a single attention head from its 5 scores.
 
@@ -128,9 +144,7 @@ def classify_head(
                        this value, classify as UNDIFFERENTIATED
 
     Returns:
-        (label, is_tie)
-        label:  integer head type label [0..5]
-        is_tie: True if classification was ambiguous
+        ClassificationResult with dominant label and mixed-behavior metadata.
     """
 
     score_arr = np.array(scores, dtype=np.float32)
@@ -139,21 +153,63 @@ def classify_head(
         warn=False,
     )
     normalized = score_arr / effective_thresholds   # element-wise division
+    threshold_flags = score_arr >= raw_thresholds
+    n_behaviors_above_threshold = int(threshold_flags.sum())
 
     # Check if all raw scores are below their respective thresholds
     if np.all(score_arr < raw_thresholds):
-        return LABEL_UNDIFF, False
+        return ClassificationResult(
+            label=LABEL_UNDIFF,
+            is_tie=False,
+            threshold_flags=threshold_flags,
+            normalized_scores=normalized,
+            primary_behavior=int(np.argmax(normalized)),
+            runner_up_behavior=int(np.argsort(normalized)[-2]),
+            dominant_margin=float(np.sort(normalized)[-1] - np.sort(normalized)[-2]),
+            n_behaviors_above_threshold=n_behaviors_above_threshold,
+        )
 
     # Sort normalized scores descending to check for ties
-    sorted_norm = np.sort(normalized)[::-1]
+    sort_idx = np.argsort(normalized)[::-1]
+    sorted_norm = normalized[sort_idx]
     top1, top2  = sorted_norm[0], sorted_norm[1]
+    dominant_margin = float(top1 - top2)
+    primary_behavior = int(sort_idx[0])
+    runner_up_behavior = int(sort_idx[1])
 
     if (top1 - top2) < tie_tolerance:
-        return LABEL_UNDIFF, True
+        return ClassificationResult(
+            label=LABEL_UNDIFF,
+            is_tie=True,
+            threshold_flags=threshold_flags,
+            normalized_scores=normalized,
+            primary_behavior=primary_behavior,
+            runner_up_behavior=runner_up_behavior,
+            dominant_margin=dominant_margin,
+            n_behaviors_above_threshold=n_behaviors_above_threshold,
+        )
 
     # Assign label = argmax(normalized) + 1
-    label = int(np.argmax(normalized)) + 1
-    return label, False
+    label = primary_behavior + 1
+    return ClassificationResult(
+        label=label,
+        is_tie=False,
+        threshold_flags=threshold_flags,
+        normalized_scores=normalized,
+        primary_behavior=primary_behavior,
+        runner_up_behavior=runner_up_behavior,
+        dominant_margin=dominant_margin,
+        n_behaviors_above_threshold=n_behaviors_above_threshold,
+    )
+
+
+def classify_head(
+    scores:           Tuple[float, float, float, float, float],
+    thresholds:       np.ndarray = THRESHOLDS,
+    tie_tolerance:    float      = TIE_TOLERANCE,
+) -> Tuple[int, bool]:
+    result = classify_head_details(scores, thresholds, tie_tolerance)
+    return result.label, result.is_tie
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -165,6 +221,13 @@ class HeadClassifier:
     Classifies all attention heads at every checkpoint and saves:
       - label_tensor: (n_ckpts, n_layers, n_heads)        int
       - score_tensor: (n_ckpts, n_layers, n_heads, 5)     float32
+      - threshold_flag_tensor:      (n_ckpts, n_layers, n_heads, 5) bool
+      - normalized_score_tensor:    (n_ckpts, n_layers, n_heads, 5) float32
+      - primary_behavior_tensor:    (n_ckpts, n_layers, n_heads) int32
+      - runner_up_tensor:           (n_ckpts, n_layers, n_heads) int32
+      - dominant_margin_tensor:     (n_ckpts, n_layers, n_heads) float32
+      - behavior_count_tensor:      (n_ckpts, n_layers, n_heads) int32
+      - natural_induction_score_tensor: optional auxiliary metric
       - step_index:   list of training steps
 
     Also logs all tie-breaking events to ties.csv.
@@ -201,6 +264,25 @@ class HeadClassifier:
         self.score_tensor = torch.zeros(
             (n_checkpoints, n_layers, n_heads, 5), dtype=torch.float32
         )
+        self.threshold_flag_tensor = torch.zeros(
+            (n_checkpoints, n_layers, n_heads, 5), dtype=torch.bool
+        )
+        self.normalized_score_tensor = torch.zeros(
+            (n_checkpoints, n_layers, n_heads, 5), dtype=torch.float32
+        )
+        self.primary_behavior_tensor = torch.full(
+            (n_checkpoints, n_layers, n_heads), -1, dtype=torch.int32
+        )
+        self.runner_up_tensor = torch.full(
+            (n_checkpoints, n_layers, n_heads), -1, dtype=torch.int32
+        )
+        self.dominant_margin_tensor = torch.zeros(
+            (n_checkpoints, n_layers, n_heads), dtype=torch.float32
+        )
+        self.behavior_count_tensor = torch.zeros(
+            (n_checkpoints, n_layers, n_heads), dtype=torch.int32
+        )
+        self.natural_induction_score_tensor: Optional[torch.Tensor] = None
         self.step_index: List[int] = []
 
         # Tie log buffer
@@ -213,6 +295,7 @@ class HeadClassifier:
         layer:        int,
         head:         int,
         scores:       Tuple[float, float, float, float, float],
+        natural_induction_score: Optional[float] = None,
     ) -> int:
         """
         Classify one head at one checkpoint and record the result.
@@ -228,7 +311,7 @@ class HeadClassifier:
             label: integer head type label
         """
 
-        label, is_tie = classify_head(
+        result = classify_head_details(
             scores,
             self.raw_thresholds,
             self.tie_tolerance,
@@ -237,12 +320,31 @@ class HeadClassifier:
         self.score_tensor[ckpt_idx, layer, head] = torch.tensor(
             scores, dtype=torch.float32
         )
-        self.label_tensor[ckpt_idx, layer, head] = label
+        self.label_tensor[ckpt_idx, layer, head] = result.label
+        self.threshold_flag_tensor[ckpt_idx, layer, head] = torch.tensor(
+            result.threshold_flags, dtype=torch.bool
+        )
+        self.normalized_score_tensor[ckpt_idx, layer, head] = torch.tensor(
+            result.normalized_scores, dtype=torch.float32
+        )
+        self.primary_behavior_tensor[ckpt_idx, layer, head] = result.primary_behavior
+        self.runner_up_tensor[ckpt_idx, layer, head] = result.runner_up_behavior
+        self.dominant_margin_tensor[ckpt_idx, layer, head] = result.dominant_margin
+        self.behavior_count_tensor[ckpt_idx, layer, head] = (
+            result.n_behaviors_above_threshold
+        )
+        if natural_induction_score is not None:
+            if self.natural_induction_score_tensor is None:
+                self.natural_induction_score_tensor = torch.zeros(
+                    (self.n_checkpoints, self.n_layers, self.n_heads),
+                    dtype=torch.float32,
+                )
+            self.natural_induction_score_tensor[ckpt_idx, layer, head] = (
+                natural_induction_score
+            )
 
-        if is_tie:
-            score_arr  = np.array(scores, dtype=np.float32)
-            normalized = score_arr / self.effective_thresholds
-            top2_idx   = np.argsort(normalized)[::-1][:2]
+        if result.is_tie:
+            top2_idx = [result.primary_behavior, result.runner_up_behavior]
             self._ties.append({
                 "run_seed":       self.seed,
                 "checkpoint_step": step,
@@ -251,9 +353,11 @@ class HeadClassifier:
                 "score_1":        float(scores[top2_idx[0]]),
                 "score_2":        float(scores[top2_idx[1]]),
                 "types_tied":     f"{HEAD_TYPES[top2_idx[0]+1]}|{HEAD_TYPES[top2_idx[1]+1]}",
+                "dominant_margin": result.dominant_margin,
+                "n_behaviors_above_threshold": result.n_behaviors_above_threshold,
             })
 
-        return label
+        return result.label
 
     def register_step(self, step: int) -> None:
         """Append a training step to the step index."""
@@ -271,7 +375,8 @@ class HeadClassifier:
         with open(self.ties_log_path, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=[
                 "run_seed", "checkpoint_step", "layer", "head",
-                "score_1", "score_2", "types_tied"
+                "score_1", "score_2", "types_tied",
+                "dominant_margin", "n_behaviors_above_threshold",
             ])
             if not file_exists:
                 writer.writeheader()
@@ -294,15 +399,25 @@ class HeadClassifier:
             {
                 "label_tensor": self.label_tensor,
                 "score_tensor": self.score_tensor,
+                "threshold_flag_tensor": self.threshold_flag_tensor,
+                "normalized_score_tensor": self.normalized_score_tensor,
+                "primary_behavior_tensor": self.primary_behavior_tensor,
+                "runner_up_tensor": self.runner_up_tensor,
+                "dominant_margin_tensor": self.dominant_margin_tensor,
+                "behavior_count_tensor": self.behavior_count_tensor,
                 "step_index":   self.step_index,
                 "seed":         self.seed,
                 "n_layers":     self.n_layers,
                 "n_heads":      self.n_heads,
+                "type_names":   HEAD_TYPES,
+                "behavior_names": BEHAVIOR_NAMES,
+                "label_schema_version": LABEL_SCHEMA_VERSION,
                 "thresholds":   self.effective_thresholds.tolist(),
                 "raw_thresholds": self.raw_thresholds.tolist(),
                 "effective_thresholds": self.effective_thresholds.tolist(),
                 "threshold_sanitization_mask": self.threshold_sanitization_mask.tolist(),
                 "thresholds_sanitized": self.thresholds_sanitized,
+                "natural_induction_score_tensor": self.natural_induction_score_tensor,
             },
             output_path,
         )
@@ -338,5 +453,68 @@ class HeadClassifier:
             data["threshold_sanitization_mask"] = [False] * 5
         if "thresholds_sanitized" not in data:
             data["thresholds_sanitized"] = False
+        if "type_names" not in data:
+            data["type_names"] = HEAD_TYPES
+        if "behavior_names" not in data:
+            data["behavior_names"] = BEHAVIOR_NAMES
+        if "label_schema_version" not in data:
+            data["label_schema_version"] = 1
+        if "threshold_flag_tensor" not in data or "normalized_score_tensor" not in data:
+            label_tensor = data["label_tensor"]
+            score_tensor = data["score_tensor"]
+            n_ckpts, n_layers, n_heads, _ = score_tensor.shape
+            threshold_flag_tensor = torch.zeros(
+                (n_ckpts, n_layers, n_heads, 5), dtype=torch.bool
+            )
+            normalized_score_tensor = torch.zeros(
+                (n_ckpts, n_layers, n_heads, 5), dtype=torch.float32
+            )
+            primary_behavior_tensor = torch.full(
+                (n_ckpts, n_layers, n_heads), -1, dtype=torch.int32
+            )
+            runner_up_tensor = torch.full(
+                (n_ckpts, n_layers, n_heads), -1, dtype=torch.int32
+            )
+            dominant_margin_tensor = torch.zeros(
+                (n_ckpts, n_layers, n_heads), dtype=torch.float32
+            )
+            behavior_count_tensor = torch.zeros(
+                (n_ckpts, n_layers, n_heads), dtype=torch.int32
+            )
+            thresholds = np.asarray(
+                data.get("raw_thresholds", data.get("thresholds", THRESHOLDS)),
+                dtype=np.float32,
+            )
+            for ckpt in range(n_ckpts):
+                for layer in range(n_layers):
+                    for head in range(n_heads):
+                        result = classify_head_details(
+                            tuple(score_tensor[ckpt, layer, head].tolist()),
+                            thresholds=thresholds,
+                            tie_tolerance=TIE_TOLERANCE,
+                        )
+                        threshold_flag_tensor[ckpt, layer, head] = torch.tensor(
+                            result.threshold_flags, dtype=torch.bool
+                        )
+                        normalized_score_tensor[ckpt, layer, head] = torch.tensor(
+                            result.normalized_scores, dtype=torch.float32
+                        )
+                        primary_behavior_tensor[ckpt, layer, head] = result.primary_behavior
+                        runner_up_tensor[ckpt, layer, head] = result.runner_up_behavior
+                        dominant_margin_tensor[ckpt, layer, head] = result.dominant_margin
+                        behavior_count_tensor[ckpt, layer, head] = (
+                            result.n_behaviors_above_threshold
+                        )
+                        if int(label_tensor[ckpt, layer, head]) not in range(len(HEAD_TYPES)):
+                            label_tensor[ckpt, layer, head] = result.label
+            data["threshold_flag_tensor"] = threshold_flag_tensor
+            data["normalized_score_tensor"] = normalized_score_tensor
+            data["primary_behavior_tensor"] = primary_behavior_tensor
+            data["runner_up_tensor"] = runner_up_tensor
+            data["dominant_margin_tensor"] = dominant_margin_tensor
+            data["behavior_count_tensor"] = behavior_count_tensor
+            data["legacy_metadata_upgraded"] = True
+        else:
+            data["legacy_metadata_upgraded"] = False
 
         return data

@@ -91,3 +91,7 @@ cache/
 
 # Modal
 .modal/
+
+# Local methodology planning notes
+METHODOLOGY_IMPROVEMENTS.txt
+METHODOLOGY_IMPROVEMENTS_REVIEW.md

@@ -162,6 +162,19 @@ def induction_score(
     return float(scores.mean().item())
 
 
+def natural_induction_score(
+    attn_head: AttentionHead,
+    induction_p1: torch.Tensor,
+    induction_p2: torch.Tensor,
+) -> float:
+    """
+    Same scoring rule as induction_score, but evaluated on naturally occurring
+    repeated subsequences rather than engineered repeats.
+    """
+
+    return induction_score(attn_head, induction_p1, induction_p2)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. Positional Score
 # ─────────────────────────────────────────────────────────────────────────────

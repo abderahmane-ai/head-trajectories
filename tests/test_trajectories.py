@@ -11,6 +11,8 @@ from analysis.trajectories import (
     compute_head_trajectories,
     find_interesting_trajectories,
     compute_specialization_onset,
+    compute_onset_bootstrap_cis,
+    compute_mixed_behavior_summary,
 )
 from probing import LABEL_UNDIFF, LABEL_SINK, LABEL_IND
 
@@ -26,6 +28,7 @@ class TestComputeGlobalCurves:
             "seed": 42,
             "n_layers": 4,
             "n_heads": 8,
+            "type_names": ["UNDIFFERENTIATED", "SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"],
         }
         
         curves = compute_global_curves([result])
@@ -46,6 +49,7 @@ class TestComputeGlobalCurves:
                 "seed": seed,
                 "n_layers": 4,
                 "n_heads": 8,
+                "type_names": ["UNDIFFERENTIATED", "SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"],
             })
         
         curves = compute_global_curves(results)
@@ -62,6 +66,7 @@ class TestComputeGlobalCurves:
             "seed": 42,
             "n_layers": 2,
             "n_heads": 4,
+            "type_names": ["UNDIFFERENTIATED", "SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"],
         }
         
         curves = compute_global_curves([result])
@@ -84,6 +89,7 @@ class TestComputePerLayerCurves:
                 "seed": seed,
                 "n_layers": 4,
                 "n_heads": 8,
+                "type_names": ["UNDIFFERENTIATED", "SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"],
             })
         
         curves = compute_per_layer_curves(results)
@@ -101,6 +107,7 @@ class TestComputePerLayerCurves:
             "seed": 42,
             "n_layers": 3,
             "n_heads": 4,
+            "type_names": ["UNDIFFERENTIATED", "SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"],
         }
         
         curves = compute_per_layer_curves([result])
@@ -123,6 +130,7 @@ class TestComputeHeadTrajectories:
             "seed": 42,
             "n_layers": n_layers,
             "n_heads": n_heads,
+            "type_names": ["UNDIFFERENTIATED", "SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"],
         }
         
         trajectories = compute_head_trajectories(result)
@@ -143,6 +151,7 @@ class TestComputeHeadTrajectories:
             "seed": 42,
             "n_layers": 2,
             "n_heads": 3,
+            "type_names": ["UNDIFFERENTIATED", "SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"],
         }
         
         trajectories = compute_head_trajectories(result)
@@ -256,6 +265,51 @@ class TestComputeSpecializationOnset:
 
         assert onset_default["POSITIONAL"] == 0
         assert onset_learned["POSITIONAL"] == 200
+
+
+class TestBootstrapAndMixedBehavior:
+    def test_bootstrap_onset_cis(self):
+        result = {
+            "label_tensor": torch.tensor(
+                [
+                    [[0, 0, 0, 0]],
+                    [[1, 1, 0, 0]],
+                    [[1, 1, 1, 0]],
+                    [[1, 1, 1, 1]],
+                ],
+                dtype=torch.int32,
+            ),
+            "step_index": [0, 100, 200, 300],
+            "seed": 42,
+            "n_layers": 1,
+            "n_heads": 4,
+            "type_names": ["UNDIFFERENTIATED", "SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"],
+        }
+        cis = compute_onset_bootstrap_cis([result], threshold_frac=0.25, n_bootstraps=50, random_seed=0)
+        assert "SINK" in cis
+        assert cis["SINK"]["point_estimate"] == 100
+        assert cis["SINK"]["n_valid_bootstraps"] > 0
+
+    def test_compute_mixed_behavior_summary(self):
+        result = {
+            "step_index": [0, 100],
+            "behavior_count_tensor": torch.tensor([[[1, 2]], [[2, 3]]], dtype=torch.int32),
+            "dominant_margin_tensor": torch.tensor([[[0.5, 0.1]], [[0.4, 0.2]]], dtype=torch.float32),
+            "primary_behavior_tensor": torch.tensor([[[0, 1]], [[0, 2]]], dtype=torch.int32),
+            "runner_up_tensor": torch.tensor([[[1, 0]], [[1, 0]]], dtype=torch.int32),
+            "threshold_flag_tensor": torch.tensor(
+                [
+                    [[[True, False, False, False, False], [True, True, False, False, False]]],
+                    [[[True, True, False, False, False], [True, True, True, False, False]]],
+                ],
+                dtype=torch.bool,
+            ),
+        }
+        summary = compute_mixed_behavior_summary([result])
+        assert summary["steps"].tolist() == [0, 100]
+        assert summary["fraction_ge2_mean"][-1] == pytest.approx(1.0)
+        assert summary["fraction_ge3_mean"][-1] == pytest.approx(0.5)
+        assert summary["final_top_pairs"]
 
 
 if __name__ == "__main__":

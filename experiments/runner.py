@@ -18,6 +18,8 @@ from analysis import (
     compute_global_curves,
     compute_head_trajectories,
     compute_induction_count_curve,
+    compute_mixed_behavior_summary,
+    compute_onset_bootstrap_cis,
     compute_per_layer_curves,
     compute_sink_persistence,
     compute_specialization_onset,
@@ -42,6 +44,7 @@ from data.loader import get_tokenizer, tokenize_text
 from data.probe import (
     build_general_probes,
     build_induction_probes,
+    build_natural_induction_probes,
     build_positional_probes,
 )
 from experiments.profiles import ExperimentProfile, get_profile
@@ -333,13 +336,18 @@ def _build_hf_probe_dataset(
 
     n_general = profile.n_general * 2
     n_induction = profile.n_induction * 3
+    n_natural_induction = max(profile.n_induction * 8, profile.n_induction)
     n_positional = profile.n_pairs * 4
     n_general_holdout = max(profile.n_general_holdout * 2, 0)
     n_induction_holdout = max(profile.n_induction_holdout * 3, 0)
+    n_natural_induction_holdout = max(
+        profile.n_induction_holdout * 8,
+        profile.n_induction_holdout,
+    )
     n_positional_holdout = max(profile.n_pairs_holdout * 4, 0)
     total_needed = (
-        n_general + n_induction + n_positional +
-        n_general_holdout + n_induction_holdout + n_positional_holdout
+        n_general + n_induction + n_natural_induction + n_positional +
+        n_general_holdout + n_induction_holdout + n_natural_induction_holdout + n_positional_holdout
     )
     if len(raw_sequences) < total_needed:
         raise RuntimeError(
@@ -352,12 +360,18 @@ def _build_hf_probe_dataset(
     offset += n_general
     pool_induction = raw_sequences[offset : offset + n_induction]
     offset += n_induction
+    pool_natural_induction = raw_sequences[offset : offset + n_natural_induction]
+    offset += n_natural_induction
     pool_positional = raw_sequences[offset : offset + n_positional]
     offset += n_positional
     pool_general_holdout = raw_sequences[offset : offset + n_general_holdout]
     offset += n_general_holdout
     pool_induction_holdout = raw_sequences[offset : offset + n_induction_holdout]
     offset += n_induction_holdout
+    pool_natural_induction_holdout = raw_sequences[
+        offset : offset + n_natural_induction_holdout
+    ]
+    offset += n_natural_induction_holdout
     pool_positional_holdout = raw_sequences[offset : offset + n_positional_holdout]
 
     probe_dict: Dict[str, torch.Tensor] = {
@@ -372,6 +386,14 @@ def _build_hf_probe_dataset(
         block_size=profile.block_size,
         seed=seed,
     )
+    natural_induction_seqs, natural_induction_p1, natural_induction_p2 = (
+        build_natural_induction_probes(
+            pool_natural_induction,
+            n_probes=profile.n_induction,
+            block_size=profile.block_size,
+            seed=seed,
+        )
+    )
     positional_seqs, positional_pairs = build_positional_probes(
         pool_positional,
         n_pairs=profile.n_pairs,
@@ -381,6 +403,9 @@ def _build_hf_probe_dataset(
     probe_dict["induction_seqs"] = induction_seqs
     probe_dict["induction_p1"] = induction_p1
     probe_dict["induction_p2"] = induction_p2
+    probe_dict["natural_induction_seqs"] = natural_induction_seqs
+    probe_dict["natural_induction_p1"] = natural_induction_p1
+    probe_dict["natural_induction_p2"] = natural_induction_p2
     probe_dict["positional_seqs"] = positional_seqs
     probe_dict["positional_pairs"] = positional_pairs
 
@@ -401,6 +426,15 @@ def _build_hf_probe_dataset(
         probe_dict["heldout_induction_seqs"] = held_seqs
         probe_dict["heldout_induction_p1"] = held_p1
         probe_dict["heldout_induction_p2"] = held_p2
+        nat_held_seqs, nat_held_p1, nat_held_p2 = build_natural_induction_probes(
+            pool_natural_induction_holdout,
+            n_probes=profile.n_induction_holdout,
+            block_size=profile.block_size,
+            seed=seed + 5000,
+        )
+        probe_dict["heldout_natural_induction_seqs"] = nat_held_seqs
+        probe_dict["heldout_natural_induction_p1"] = nat_held_p1
+        probe_dict["heldout_natural_induction_p2"] = nat_held_p2
     if profile.n_pairs_holdout > 0:
         held_pos_seqs, held_pos_pairs = build_positional_probes(
             pool_positional_holdout,
@@ -443,6 +477,15 @@ def _build_hf_probe_dataset(
     )
     probe_dict[f"calibrated_thresholds_{prefix}_requires_sanitization"] = torch.tensor(
         diag["requires_sanitization"], dtype=torch.bool
+    )
+    probe_dict[f"calibrated_thresholds_{prefix}_null_scores"] = torch.tensor(
+        diag["per_seed_null_scores"], dtype=torch.float32
+    )
+    probe_dict[f"calibrated_thresholds_{prefix}_null_scores_pooled"] = torch.tensor(
+        diag["pooled_null_scores"], dtype=torch.float32
+    )
+    probe_dict[f"calibrated_thresholds_{prefix}_null_seed_list"] = torch.tensor(
+        diag["null_seed_list"], dtype=torch.long
     )
     probe_dict["calibration_seeds"] = torch.tensor(
         [seed + i for i in range(profile.n_calibration_seeds)], dtype=torch.long
@@ -823,11 +866,18 @@ def analyze_single_run(
     results = load_run_results(paths.results_path)
     global_curves = compute_global_curves([results])
     onset_steps = compute_specialization_onset(global_curves, threshold_frac=0.05)
+    onset_cis = compute_onset_bootstrap_cis(
+        [results],
+        threshold_frac=0.05,
+        n_bootstraps=1000,
+        random_seed=0,
+    )
     learned_onset_steps = compute_specialization_onset(
         global_curves,
         threshold_frac=0.05,
         exclude_positional_init=True,
     )
+    mixed_behavior = compute_mixed_behavior_summary([results])
     per_layer_curves = compute_per_layer_curves([results])
     trajectories = compute_head_trajectories(results)
     interesting = find_interesting_trajectories(trajectories, min_type_changes=2)
@@ -922,13 +972,26 @@ def analyze_single_run(
         "seed": seed,
         "steps": [int(x) for x in global_curves["steps"].tolist()],
         "onset_steps": onset_steps,
+        "onset_cis": onset_cis,
         "learned_onset_steps": learned_onset_steps,
         "final_fractions": final_fractions,
+        "mixed_behavior": {
+            "fraction_ge2_final": float(mixed_behavior["fraction_ge2_mean"][-1]),
+            "fraction_ge3_final": float(mixed_behavior["fraction_ge3_mean"][-1]),
+            "mean_dominant_margin_final": float(mixed_behavior["mean_dominant_margin"][-1]),
+            "final_top_pairs": mixed_behavior["final_top_pairs"],
+            "final_top_triplets": mixed_behavior["final_top_triplets"],
+        },
         "crossing_steps": {
             f"{int(frac * 100)}pct": step
             for frac, step in crossing_steps.items()
         },
         "discontinuity_score": float(discontinuity),
+        "natural_induction_final_mean": (
+            float(np.asarray(results["natural_induction_score_tensor"][-1]).mean())
+            if results.get("natural_induction_score_tensor") is not None
+            else None
+        ),
         "threshold_sensitivity": threshold_sensitivity["robustness_summary"],
         "sink_persistence": {
             "mean_persistence": float(sink_persistence["mean_persistence"]),
@@ -988,11 +1051,18 @@ def analyze_profile_group(
     global_curves = compute_global_curves(run_results)
     per_layer_curves = compute_per_layer_curves(run_results)
     onset_steps = compute_specialization_onset(global_curves, threshold_frac=0.05)
+    onset_cis = compute_onset_bootstrap_cis(
+        run_results,
+        threshold_frac=0.05,
+        n_bootstraps=1000,
+        random_seed=0,
+    )
     learned_onset_steps = compute_specialization_onset(
         global_curves,
         threshold_frac=0.05,
         exclude_positional_init=True,
     )
+    mixed_behavior = compute_mixed_behavior_summary(run_results)
 
     aggregate_dir = artifact_root_path / profile_obj.name / "aggregate"
     aggregate_dir.mkdir(parents=True, exist_ok=True)
@@ -1019,8 +1089,16 @@ def analyze_profile_group(
         "n_runs": len(run_results),
         "steps": [int(x) for x in global_curves["steps"].tolist()],
         "onset_steps": onset_steps,
+        "onset_cis": onset_cis,
         "learned_onset_steps": learned_onset_steps,
         "final_fractions": final_fractions,
+        "mixed_behavior": {
+            "fraction_ge2_final": float(mixed_behavior["fraction_ge2_mean"][-1]),
+            "fraction_ge3_final": float(mixed_behavior["fraction_ge3_mean"][-1]),
+            "mean_dominant_margin_final": float(mixed_behavior["mean_dominant_margin"][-1]),
+            "final_top_pairs": mixed_behavior["final_top_pairs"],
+            "final_top_triplets": mixed_behavior["final_top_triplets"],
+        },
         "layer_count": int(per_layer_curves["n_layers"]),
         "timeline_figure": str(figure_path),
         "summary_path": str(summary_path),

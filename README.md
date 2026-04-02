@@ -31,6 +31,7 @@ Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 **Probing:** Fixed held-out dataset with three probe types:
 - General sequences (real text)
 - Induction sequences (engineered repeated patterns)
+- Natural induction sequences (real repeated subsequences, scored as an auxiliary comparison)
 - Positional pairs (same length, different content)
 
 **Scoring:** Five behavioral metrics per head:
@@ -40,7 +41,7 @@ Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 - **POSITIONAL**: Content-invariant attention (KL divergence)
 - **SEMANTIC**: Alignment with embedding similarity (masked)
 
-**Classification:** Thresholds are calibrated from a causally scrambled random baseline. `SINK`, `PREV_TOKEN`, `INDUCTION`, and `POSITIONAL` use `mean + 2σ`; `SEMANTIC` uses the null `p99` because its per-head null variance collapses after averaging. Heads are classified by `argmax(scores / thresholds)` with a conservative tie tolerance, and the raw score tensor is preserved so mixed behaviors are not lost analytically.
+**Classification:** Thresholds are calibrated from a causally scrambled random baseline. `SINK`, `PREV_TOKEN`, `INDUCTION`, and `POSITIONAL` use `mean + 2σ`; `SEMANTIC` uses the null `p99` because its per-head null variance collapses after averaging. Heads are classified by `argmax(scores / thresholds)` with a conservative tie tolerance, and the results file now also stores threshold flags, normalized scores, runner-up behavior, dominant margin, and behavior-count metadata for mixed-behavior analysis.
 
 See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 

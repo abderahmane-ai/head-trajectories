@@ -122,4 +122,8 @@ class TestCalibrateThresholds:
         assert diagnostics["per_seed_metric_p95"].shape == (2, 5)
         assert diagnostics["per_seed_metric_p99"].shape == (2, 5)
         assert diagnostics["per_seed_nonpositive_mask"].shape == (2, 5)
+        assert diagnostics["per_seed_null_scores"].shape[0] == 2
+        assert diagnostics["per_seed_null_scores"].shape[-1] == 5
+        assert diagnostics["pooled_null_scores"].shape[-1] == 5
+        assert diagnostics["null_seed_list"].shape == (2,)
         assert diagnostics["threshold_rules"][SEMANTIC_METRIC_INDEX].startswith("quantile_")

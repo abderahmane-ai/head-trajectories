@@ -8,7 +8,8 @@ Orchestrates the entire measurement phase:
      b. Extracts attention maps for all probe types
      c. Computes all 5 scores for every (layer, head) pair
      d. Classifies each head and records the result
-  3. Saves the complete label_tensor, score_tensor, and step_index
+  3. Saves the complete label_tensor, score_tensor, mixed-behavior metadata,
+     and optional natural-induction auxiliary scores
 
 This is the most compute-intensive phase after training itself.
 Expected runtime: ~2–3 minutes per checkpoint × 100 checkpoints ≈ 3–5 hours.
@@ -20,7 +21,7 @@ import torch
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from .extractor import extract_checkpoint, CheckpointExtraction
-from .scores import score_head
+from .scores import natural_induction_score, score_head
 from .classifier import HeadClassifier, HEAD_TYPES, THRESHOLDS
 
 
@@ -128,23 +129,35 @@ def score_all_heads(
     n_layers = extraction.config.n_layers
     n_heads  = extraction.config.n_heads
 
-    induction_p1     = probe_dict["induction_p1"]     # (100,)
-    induction_p2     = probe_dict["induction_p2"]     # (100,)
-    positional_pairs = probe_dict["positional_pairs"] # (50, 2)
-    token_ids        = extraction.general_token_ids   # (500, 256)
-    embedding_matrix = extraction.embedding_matrix    # (V, D)
+    induction_p1 = probe_dict["induction_p1"]          # (100,)
+    induction_p2 = probe_dict["induction_p2"]          # (100,)
+    natural_induction_p1 = probe_dict.get("natural_induction_p1")
+    natural_induction_p2 = probe_dict.get("natural_induction_p2")
+    positional_pairs = probe_dict["positional_pairs"]  # (50, 2)
+    token_ids = extraction.general_token_ids           # (500, 256)
+    embedding_matrix = extraction.embedding_matrix     # (V, D)
 
     for layer in range(n_layers):
         # Full layer attention maps — shape (N, n_heads, T, T)
-        general_layer    = extraction.general_maps[layer]    # (500, n_heads, T, T)
-        induction_layer  = extraction.induction_maps[layer]  # (100, n_heads, T, T)
+        general_layer = extraction.general_maps[layer]    # (500, n_heads, T, T)
+        induction_layer = extraction.induction_maps[layer]  # (100, n_heads, T, T)
         positional_layer = extraction.positional_maps[layer] # (100, n_heads, T, T)
+        natural_induction_layer = (
+            extraction.natural_induction_maps[layer]
+            if extraction.natural_induction_maps is not None
+            else None
+        )
 
         for head in range(n_heads):
             # Slice to single head: (N, T, T)
-            general_head    = general_layer[:, head, :, :]    # (500, T, T)
-            induction_head  = induction_layer[:, head, :, :]  # (100, T, T)
+            general_head = general_layer[:, head, :, :]    # (500, T, T)
+            induction_head = induction_layer[:, head, :, :]  # (100, T, T)
             positional_head = positional_layer[:, head, :, :] # (100, T, T)
+            natural_induction_head = (
+                natural_induction_layer[:, head, :, :]
+                if natural_induction_layer is not None
+                else None
+            )
 
             scores = score_head(
                 general_attn=general_head,
@@ -157,12 +170,25 @@ def score_all_heads(
                 embedding_matrix=embedding_matrix,
             )
 
+            natural_score = None
+            if (
+                natural_induction_head is not None
+                and natural_induction_p1 is not None
+                and natural_induction_p2 is not None
+            ):
+                natural_score = natural_induction_score(
+                    natural_induction_head,
+                    natural_induction_p1,
+                    natural_induction_p2,
+                )
+
             classifier.record(
                 ckpt_idx=ckpt_idx,
                 step=step,
                 layer=layer,
                 head=head,
                 scores=scores,
+                natural_induction_score=natural_score,
             )
 
 
@@ -223,6 +249,9 @@ def run_probing_pipeline(
             "heldout_induction_seqs",
             "heldout_induction_p1",
             "heldout_induction_p2",
+            "heldout_natural_induction_seqs",
+            "heldout_natural_induction_p1",
+            "heldout_natural_induction_p2",
             "heldout_positional_seqs",
             "heldout_positional_pairs",
         }
@@ -236,6 +265,9 @@ def run_probing_pipeline(
         probe_view["induction_seqs"] = probe_dict["heldout_induction_seqs"]
         probe_view["induction_p1"] = probe_dict["heldout_induction_p1"]
         probe_view["induction_p2"] = probe_dict["heldout_induction_p2"]
+        probe_view["natural_induction_seqs"] = probe_dict["heldout_natural_induction_seqs"]
+        probe_view["natural_induction_p1"] = probe_dict["heldout_natural_induction_p1"]
+        probe_view["natural_induction_p2"] = probe_dict["heldout_natural_induction_p2"]
         probe_view["positional_seqs"] = probe_dict["heldout_positional_seqs"]
         probe_view["positional_pairs"] = probe_dict["heldout_positional_pairs"]
         probe_dict = probe_view
@@ -293,6 +325,16 @@ def run_probing_pipeline(
     if partial is not None and completed_steps:
         classifier.label_tensor = partial["label_tensor"]
         classifier.score_tensor = partial["score_tensor"]
+        if "threshold_flag_tensor" in partial:
+            classifier.threshold_flag_tensor = partial["threshold_flag_tensor"]
+            classifier.normalized_score_tensor = partial["normalized_score_tensor"]
+            classifier.primary_behavior_tensor = partial["primary_behavior_tensor"]
+            classifier.runner_up_tensor = partial["runner_up_tensor"]
+            classifier.dominant_margin_tensor = partial["dominant_margin_tensor"]
+            classifier.behavior_count_tensor = partial["behavior_count_tensor"]
+        classifier.natural_induction_score_tensor = partial.get(
+            "natural_induction_score_tensor"
+        )
         classifier.step_index = partial["step_index"]
 
     # ── Process each checkpoint ──────────────────────────────────────────────
@@ -354,7 +396,7 @@ def run_probing_pipeline(
         labels_this_ckpt = classifier.label_tensor[ckpt_idx]
         type_counts = {
             HEAD_TYPES[t]: int((labels_this_ckpt == t).sum())
-            for t in range(6)
+            for t in range(len(HEAD_TYPES))
         }
         dominant = max(type_counts, key=lambda k: type_counts[k] if k != "UNDIFFERENTIATED" else -1)
 
@@ -383,7 +425,7 @@ def run_probing_pipeline(
     # Final type distribution at last checkpoint
     final_labels = classifier.label_tensor[-1]
     print(f"\n  Final checkpoint head type distribution:")
-    for t in range(6):
+    for t in range(len(HEAD_TYPES)):
         count = int((final_labels == t).sum())
         bar   = "█" * count
         print(f"    {HEAD_TYPES[t]:<20}: {count:>3}  {bar}")

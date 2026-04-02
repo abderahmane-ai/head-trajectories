@@ -8,6 +8,7 @@ import numpy as np
 from pathlib import Path
 from probing.classifier import (
     classify_head,
+    classify_head_details,
     HeadClassifier,
     prepare_thresholds,
     HEAD_TYPES,
@@ -53,6 +54,19 @@ class TestClassifyHead:
         label, is_tie = classify_head(scores, tie_tolerance=0.05)
         assert label == LABEL_UNDIFF, "Tie should result in UNDIFF"
         assert is_tie, "Should detect tie"
+
+    def test_classification_metadata(self):
+        """Detailed classification should expose mixed-behavior metadata."""
+        scores = (0.42, 0.52, 0.1, 0.3, 0.1)
+        result = classify_head_details(scores, tie_tolerance=0.05)
+        assert result.label == LABEL_UNDIFF
+        assert result.is_tie
+        assert result.threshold_flags.shape == (5,)
+        assert result.normalized_scores.shape == (5,)
+        assert result.primary_behavior == 0
+        assert result.runner_up_behavior == 1
+        assert result.n_behaviors_above_threshold == 2
+        assert result.dominant_margin >= 0.0
     
     def test_custom_thresholds(self):
         """Test with custom threshold values."""
@@ -131,6 +145,12 @@ class TestHeadClassifier:
         
         assert classifier.label_tensor.shape == (10, 4, 8)
         assert classifier.score_tensor.shape == (10, 4, 8, 5)
+        assert classifier.threshold_flag_tensor.shape == (10, 4, 8, 5)
+        assert classifier.normalized_score_tensor.shape == (10, 4, 8, 5)
+        assert classifier.primary_behavior_tensor.shape == (10, 4, 8)
+        assert classifier.runner_up_tensor.shape == (10, 4, 8)
+        assert classifier.dominant_margin_tensor.shape == (10, 4, 8)
+        assert classifier.behavior_count_tensor.shape == (10, 4, 8)
         assert len(classifier.step_index) == 0
     
     def test_record_and_classify(self, workspace_tmpdir):
@@ -163,6 +183,10 @@ class TestHeadClassifier:
             classifier.score_tensor[0, 0, 0],
             torch.tensor(scores, dtype=torch.float32),
         )
+        assert classifier.threshold_flag_tensor[0, 0, 0].tolist() == [True, False, False, False, False]
+        assert int(classifier.primary_behavior_tensor[0, 0, 0]) == 0
+        assert int(classifier.runner_up_tensor[0, 0, 0]) >= 0
+        assert int(classifier.behavior_count_tensor[0, 0, 0]) == 1
     
     def test_tie_logging(self, workspace_tmpdir):
         """Test that ties are logged correctly."""
@@ -244,9 +268,17 @@ class TestHeadClassifier:
         assert len(loaded["step_index"]) == 3
         assert loaded["label_tensor"].shape == (3, 2, 4)
         assert loaded["score_tensor"].shape == (3, 2, 4, 5)
+        assert loaded["threshold_flag_tensor"].shape == (3, 2, 4, 5)
+        assert loaded["normalized_score_tensor"].shape == (3, 2, 4, 5)
+        assert loaded["primary_behavior_tensor"].shape == (3, 2, 4)
+        assert loaded["runner_up_tensor"].shape == (3, 2, 4)
+        assert loaded["dominant_margin_tensor"].shape == (3, 2, 4)
+        assert loaded["behavior_count_tensor"].shape == (3, 2, 4)
         assert "raw_thresholds" in loaded
         assert "effective_thresholds" in loaded
         assert "thresholds_sanitized" in loaded
+        assert loaded["type_names"] == HEAD_TYPES
+        assert loaded["label_schema_version"] >= 2
     
     def test_custom_thresholds(self, workspace_tmpdir):
         """Test classifier with custom thresholds."""

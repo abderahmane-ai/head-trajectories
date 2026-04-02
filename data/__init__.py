@@ -10,6 +10,7 @@ from .loader import (
 )
 from .probe import (
     build_probe_dataset,
+    build_natural_induction_probes,
     load_probe_dataset,
     verify_induction_probes,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "estimate_val_loss",
     "print_loader_stats",
     "build_probe_dataset",
+    "build_natural_induction_probes",
     "load_probe_dataset",
     "verify_induction_probes",
 ]

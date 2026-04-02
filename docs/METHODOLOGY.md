@@ -113,6 +113,7 @@ The probe dataset is partitioned into:
 
 - **general probes**
 - **induction probes**
+- **natural induction probes**
 - **positional probes**
 
 Each partition is used for a specific subset of scores.
@@ -160,6 +161,16 @@ $$
 $$
 
 These are used to test whether a head’s attention pattern is driven by **position** rather than **content**.
+
+### 4.4 Natural induction probes
+
+Natural induction probes are real held-out sequences that already contain repeated subsequences. For each such probe, the dataset stores:
+
+- a token sequence $x^{\text{nat-ind}}_n$
+- $p^{(1)}_n$: start index of the first natural occurrence
+- $p^{(2)}_n$: start index of the later occurrence
+
+These probes are not used for the main five-way classifier. Instead, they provide an auxiliary comparison that asks whether induction-like behavior on engineered probes also transfers to naturally repeated text.
 
 ---
 
@@ -472,6 +483,9 @@ The repository repeats this calibration across several random seeds and stores:
 - per-seed metric means
 - per-seed metric standard deviations
 - per-seed metric quantiles (`p95`, `p99`)
+- per-seed headwise null-score arrays
+- pooled null-score arrays across calibration seeds
+- the calibration seed list used to generate those null scores
 - whether any threshold was non-positive and would require defensive sanitization at classification time
 - their empirical mean
 - their empirical standard deviation
@@ -562,6 +576,17 @@ $$
 \end{cases}
 $$
 
+In addition to the dominant categorical label, the saved results now retain:
+
+- raw score vectors
+- threshold-presence flags
+- threshold-normalized scores
+- runner-up behavior identity
+- dominant-vs-runner-up margin
+- number of behaviors above threshold
+
+These metadata make mixed-behavior analysis possible without changing the core dominant-label classifier.
+
 ---
 
 ## 8. Trajectories
@@ -590,6 +615,16 @@ f_{k,c}
 $$
 
 Across multiple seeds, these are averaged to yield mean and standard deviation bands.
+
+### 8.1.1 Onset confidence intervals
+
+Onset steps are point estimates derived from the fraction curves. To quantify uncertainty, the analysis now also supports bootstrap confidence intervals:
+
+- resample heads within each layer, with replacement
+- recompute global curves and onset steps
+- report the 2.5th and 97.5th percentiles of the bootstrap onset distribution
+
+These intervals are especially important for H1 and H2, where apparent ordering can otherwise be overstated.
 
 ### 8.2 Per-layer curves
 
