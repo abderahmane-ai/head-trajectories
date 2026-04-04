@@ -1,8 +1,10 @@
+import numpy as np
 import torch
 
 from data.calibration import CALIBRATION_VERSION
 from experiments.profiles import get_profile, list_profiles
 from experiments.runner import (
+    _build_hf_probe_dataset,
     build_or_load_probe_dataset,
     ensure_dirs,
     normalize_run_specs,
@@ -97,3 +99,108 @@ def test_build_or_load_probe_dataset_rebuilds_stale_probe(monkeypatch, workspace
     loaded = build_or_load_probe_dataset(profile, paths, device="cpu", rebuild=False)
 
     assert loaded is rebuilt
+
+
+def test_hf_probe_build_reduces_natural_induction_headroom_when_split_is_small(
+    monkeypatch, workspace_tmpdir
+):
+    profile = get_profile("wikitext103_15m_preliminary")
+    output_path = workspace_tmpdir / "probe_dataset.pt"
+
+    class _Split:
+        column_names = ["text"]
+
+        def __getitem__(self, key):
+            if key != "text":
+                raise KeyError(key)
+            return ["dummy"]
+
+    fake_dataset = {profile.probe_split: _Split()}
+
+    monkeypatch.setattr("datasets.load_dataset", lambda *args, **kwargs: fake_dataset)
+
+    raw_sequence_count = 1117
+    fake_tokens = torch.arange(
+        raw_sequence_count * profile.block_size, dtype=torch.long
+    ).view(raw_sequence_count, profile.block_size)
+    monkeypatch.setattr(
+        "experiments.runner._encode_split_texts",
+        lambda texts, block_size: fake_tokens,
+    )
+
+    monkeypatch.setattr(
+        "experiments.runner.build_general_probes",
+        lambda raw_sequences, n_general, block_size, seed: torch.zeros(
+            (n_general, block_size), dtype=torch.long
+        ),
+    )
+    monkeypatch.setattr(
+        "experiments.runner.build_induction_probes",
+        lambda raw_sequences, n_probes, block_size, seed: (
+            torch.zeros((n_probes, block_size), dtype=torch.long),
+            torch.zeros((n_probes,), dtype=torch.long),
+            torch.zeros((n_probes,), dtype=torch.long),
+        ),
+    )
+
+    natural_pool_sizes = []
+
+    def fake_build_natural(raw_sequences, n_probes, block_size, seed):
+        natural_pool_sizes.append((len(raw_sequences), n_probes))
+        assert len(raw_sequences) >= n_probes
+        return (
+            torch.zeros((n_probes, block_size), dtype=torch.long),
+            torch.zeros((n_probes,), dtype=torch.long),
+            torch.zeros((n_probes,), dtype=torch.long),
+        )
+
+    monkeypatch.setattr(
+        "experiments.runner.build_natural_induction_probes",
+        fake_build_natural,
+    )
+    monkeypatch.setattr(
+        "experiments.runner.build_positional_probes",
+        lambda raw_sequences, n_pairs, block_size, seed: (
+            torch.zeros((2 * n_pairs, block_size), dtype=torch.long),
+            torch.arange(2 * n_pairs, dtype=torch.long).view(n_pairs, 2),
+        ),
+    )
+    monkeypatch.setattr(
+        "experiments.runner.calibrate_thresholds",
+        lambda **kwargs: (
+            np.array([0.1] * 5, dtype=np.float32),
+            np.array([0.01] * 5, dtype=np.float32),
+            np.array([[0.1] * 5] * profile.n_calibration_seeds, dtype=np.float32),
+            {
+                "per_seed_metric_means": np.zeros((profile.n_calibration_seeds, 5), dtype=np.float32),
+                "per_seed_metric_stds": np.zeros((profile.n_calibration_seeds, 5), dtype=np.float32),
+                "per_seed_metric_p95": np.zeros((profile.n_calibration_seeds, 5), dtype=np.float32),
+                "per_seed_metric_p99": np.zeros((profile.n_calibration_seeds, 5), dtype=np.float32),
+                "per_seed_nonpositive_mask": [[False] * 5]
+                * profile.n_calibration_seeds,
+                "requires_sanitization": False,
+                "per_seed_null_scores": np.zeros((profile.n_calibration_seeds, 1, 5), dtype=np.float32),
+                "pooled_null_scores": np.zeros((1, 5), dtype=np.float32),
+                "null_seed_list": list(range(profile.n_calibration_seeds)),
+                "threshold_rules": ["mean_plus_2std"] * 4 + ["quantile_0.99"],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "experiments.runner.verify_induction_probes",
+        lambda probe_dict: None,
+    )
+
+    probe = _build_hf_probe_dataset(
+        profile=profile,
+        output_path=output_path,
+        seed=0,
+        device=torch.device("cpu"),
+    )
+
+    assert probe["natural_induction_seqs"].shape[0] == profile.n_induction
+    assert probe["heldout_natural_induction_seqs"].shape[0] == profile.n_induction_holdout
+    assert natural_pool_sizes == [
+        (87, profile.n_induction),
+        (22, profile.n_induction_holdout),
+    ]

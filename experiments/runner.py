@@ -336,23 +336,70 @@ def _build_hf_probe_dataset(
 
     n_general = profile.n_general * 2
     n_induction = profile.n_induction * 3
-    n_natural_induction = max(profile.n_induction * 8, profile.n_induction)
     n_positional = profile.n_pairs * 4
     n_general_holdout = max(profile.n_general_holdout * 2, 0)
     n_induction_holdout = max(profile.n_induction_holdout * 3, 0)
-    n_natural_induction_holdout = max(
+    n_positional_holdout = max(profile.n_pairs_holdout * 4, 0)
+
+    fixed_needed = (
+        n_general
+        + n_induction
+        + n_positional
+        + n_general_holdout
+        + n_induction_holdout
+        + n_positional_holdout
+    )
+    min_natural_induction = profile.n_induction
+    min_natural_induction_holdout = profile.n_induction_holdout
+    minimum_needed = (
+        fixed_needed + min_natural_induction + min_natural_induction_holdout
+    )
+    if len(raw_sequences) < minimum_needed:
+        raise RuntimeError(
+            f"Profile {profile.name} needs at least {minimum_needed} probe source sequences, "
+            f"but only {len(raw_sequences)} are available."
+        )
+
+    desired_natural_induction = max(profile.n_induction * 8, profile.n_induction)
+    desired_natural_induction_holdout = max(
         profile.n_induction_holdout * 8,
         profile.n_induction_holdout,
     )
-    n_positional_holdout = max(profile.n_pairs_holdout * 4, 0)
-    total_needed = (
-        n_general + n_induction + n_natural_induction + n_positional +
-        n_general_holdout + n_induction_holdout + n_natural_induction_holdout + n_positional_holdout
+    desired_train_extra = desired_natural_induction - min_natural_induction
+    desired_holdout_extra = (
+        desired_natural_induction_holdout - min_natural_induction_holdout
     )
-    if len(raw_sequences) < total_needed:
-        raise RuntimeError(
-            f"Profile {profile.name} needs {total_needed} probe source sequences, "
-            f"but only {len(raw_sequences)} are available."
+    remaining_extra = len(raw_sequences) - minimum_needed
+    total_desired_extra = desired_train_extra + desired_holdout_extra
+    train_extra = 0
+    holdout_extra = 0
+    if total_desired_extra > 0 and remaining_extra > 0:
+        train_extra = min(
+            desired_train_extra,
+            remaining_extra * desired_train_extra // total_desired_extra,
+        )
+        holdout_extra = min(
+            desired_holdout_extra,
+            remaining_extra - train_extra,
+        )
+        leftover = remaining_extra - train_extra - holdout_extra
+        if leftover > 0:
+            add_train = min(desired_train_extra - train_extra, leftover)
+            train_extra += add_train
+            leftover -= add_train
+        if leftover > 0:
+            add_holdout = min(desired_holdout_extra - holdout_extra, leftover)
+            holdout_extra += add_holdout
+
+    n_natural_induction = min_natural_induction + train_extra
+    n_natural_induction_holdout = min_natural_induction_holdout + holdout_extra
+    if n_natural_induction < desired_natural_induction or (
+        n_natural_induction_holdout < desired_natural_induction_holdout
+    ):
+        print(
+            "[Probe] Limited held-out split detected; reducing natural induction "
+            f"candidate pools to train={n_natural_induction}, "
+            f"holdout={n_natural_induction_holdout}."
         )
 
     offset = 0
