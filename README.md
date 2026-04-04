@@ -28,10 +28,10 @@ Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 
 **Training:** Profile-driven decoder-only transformer runs. The repository currently supports notebook-scale comparison runs on WikiText-103 and LM1B, plus longer OpenWebText runs. Checkpoint schedules are profile-specific, but all keep a dense-early emphasis.
 
-**Probing:** Fixed held-out dataset with three probe types:
+**Probing:** Fixed held-out dataset with probe families:
 - General sequences (real text)
 - Induction sequences (engineered repeated patterns)
-- Natural induction sequences (real repeated subsequences, scored as an auxiliary comparison)
+- Natural induction sequences (real repeated subsequences, optional auxiliary comparison and currently disabled by default)
 - Positional pairs (same length, different content)
 
 **Scoring:** Five behavioral metrics per head:

@@ -556,6 +556,15 @@ $$
 
 and the tie is logged.
 
+### Current interpretation note
+
+Under the current default methodology, this six-label rule remains the active classifier because it preserves comparability across the current WikiText and LM1B baselines. However, the current empirical baselines also show that many heads have multiple behaviors above threshold simultaneously. The next intended methodology change is therefore **not** a score rewrite, but a richer classification/reporting layer that preserves the current five scores and thresholding scheme while surfacing:
+
+- `WEAK` versus `AMBIGUOUS` non-specialized states
+- dominant behavior plus runner-up behavior
+- dominant margin
+- number of behaviors above threshold
+
 ### Case 3: clear winner
 
 Otherwise, assign the label corresponding to:

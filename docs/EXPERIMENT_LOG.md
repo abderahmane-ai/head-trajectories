@@ -2,6 +2,47 @@
 
 This file is a historical log of early pilot runs. For current-calibration archived findings and their run reports, see the local `run_exports/` archive rather than treating the notes below as the current state of evidence.
 
+## Current Baseline Conclusions
+
+As of the current default methodology (`enable_natural_induction = false`), the strongest baseline conclusions come from the archived default-methodology WikiText and LM1B runs in `run_exports/`.
+
+### Cross-dataset result
+
+The clearest current empirical result is:
+
+- final head-type mixes are strongly dataset-sensitive
+- WikiText ends much more split between `PREV_TOKEN` and `SEMANTIC`
+- LM1B ends much more strongly `PREV_TOKEN`-dominated
+
+In other words, the dominant behavioral composition is not fixed by architecture alone; it depends strongly on the training corpus.
+
+### Classification result
+
+The other important current conclusion is:
+
+- many heads exhibit multiple behaviors above threshold simultaneously
+- dominant labels are still useful, but they compress substantial overlap
+
+This means the next intended methodology improvement is **classification/reporting**, not a rewrite of the score definitions.
+
+Specifically, the next classification layer should keep the current five scores and thresholding scheme, but should expose:
+
+- `WEAK` versus `AMBIGUOUS` non-specialized states
+- dominant behavior plus runner-up behavior
+- dominant margin
+- number of behaviors above threshold
+
+### Current hypothesis status
+
+- `H1` (sink-first among learned types): not robust in current single-seed comparison runs
+- `H2` (ordered development): not robust in current single-seed comparison runs
+
+### Next run priority
+
+After the current WikiText and LM1B baselines, the next highest-value run is:
+
+- `openwebtext_15m_main`
+
 ## Preliminary Pilot Run: `modal_a100_preliminary`
 
 **Date:** March 2026  
