@@ -275,7 +275,9 @@ def print_stability_report(
     print(f"\n  Mean type changes by final head type:")
     print(f"  {'─' * 50}")
     for type_name, stats in per_type_stab.items():
-        if type_name in {"WEAK", "AMBIGUOUS", "UNDIFFERENTIATED"}:
+        # "UNDIFFERENTIATED" is legacy-only (pre FDR migration). Keep it here so
+        # stability reporting remains sane when inspecting old result bundles.
+        if type_name in {"WEAK", "AMBIGUOUS"} or type_name == "UNDIFFERENTIATED":
             continue
         n = stats["n_heads"]
         m = stats["mean_changes"]

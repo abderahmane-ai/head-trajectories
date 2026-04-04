@@ -567,6 +567,10 @@ class HeadClassifier:
         if "thresholds_sanitized" not in data:
             data["thresholds_sanitized"] = False
         if "type_names" not in data:
+            # Legacy-only: old result files stored a 6-label ontology with an
+            # `UNDIFFERENTIATED` bucket. Modern runs use
+            # {WEAK, AMBIGUOUS, five behaviors}. Keep this mapping so archived
+            # results remain inspectable.
             legacy_types = ["UNDIFFERENTIATED", "SINK", "PREV_TOKEN", "INDUCTION", "POSITIONAL", "SEMANTIC"]
             data["type_names"] = legacy_types
         if "behavior_names" not in data:

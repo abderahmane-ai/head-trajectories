@@ -162,7 +162,7 @@ representation that can be analyzed consistently across checkpoints.
 
 This document formalizes that methodology. A transformer is checkpointed
 throughout training, a fixed held-out probe set is run through every checkpoint,
-each head is scored on five behaviors, thresholds are calibrated from a
+each head is scored on five behaviors, an empirical null is calibrated from a
 causally valid random baseline, and heads are classified and tracked over time.
 The output is not merely a snapshot of head types, but a family of calibrated
 head trajectories from which onset, stability, layer stratification, and
@@ -182,7 +182,7 @@ interpretive claims the pipeline can and cannot support.
 \pipelinearrow
 \text{score each head}
 \pipelinearrow
-\text{calibrate thresholds}
+\text{calibrate empirical null}
 \pipelinearrow
 \text{classify heads}
 \pipelinearrow
@@ -204,8 +204,8 @@ The methodology is built around four commitments:
 \begin{enumerate}
 \item the probe dataset is fixed across checkpoints and runs;
 \item behavioral scores are defined once and applied uniformly;
-\item thresholds are calibrated relative to an architecture-matched random
-baseline;
+\item an empirical null is calibrated relative to an architecture-matched random
+baseline (with threshold summaries retained only as diagnostics);
 \item the main object of analysis is a trajectory, not a terminal label.
 \end{enumerate}
 
@@ -668,8 +668,8 @@ auditable.
 
 \begin{itemize}
 \item the current positional metric is still heuristic;
-\item argmax classification compresses potentially mixed behaviors into one
-label;
+\item dominant-summary labels compress potentially mixed behaviors into one
+reported type unless the active-set view is inspected;
 \item onset depends on an operational threshold fraction;
 \item cross-seed agreement remains an empirical question, not a methodological
 guarantee.
@@ -689,8 +689,8 @@ guarantee.
 The Head Trajectories project is fundamentally a measurement pipeline for
 developmental interpretability. Models are checkpointed through training, a
 fixed probe set is reused at every checkpoint, five behavior scores are
-computed for every head, thresholds are calibrated with a causally valid random
-baseline, and head identities are tracked as trajectories. The result is a
+computed for every head, an empirical null is calibrated with a causally valid
+random baseline, and head identities are tracked as trajectories. The result is a
 framework designed to answer a developmental question in a disciplined way: not
 only what attention heads do after training, but how recognizable behaviors
 appear, stabilize, and transform during optimization.
@@ -701,8 +701,8 @@ appear, stabilize, and transform during optimization.
 
 The methodology measures attention-head development by scoring every head at
 every checkpoint against a fixed probe dataset, calibrating behavioral
-significance with a causally valid random baseline, and analyzing the resulting
-label trajectories over training.
+significance with a causally valid random baseline (empirical null + FDR), and
+analyzing both activation and dominance trajectories over training.
 \end{abstractbox}
 
 \bibliographystyle{plain}
