@@ -145,7 +145,14 @@ def test_hf_probe_build_reduces_natural_induction_headroom_when_split_is_small(
 
     natural_pool_sizes = []
 
-    def fake_build_natural(raw_sequences, n_probes, block_size, seed):
+    def fake_build_natural(
+        raw_sequences,
+        n_probes,
+        block_size,
+        seed,
+        allow_partial=False,
+        min_probes=None,
+    ):
         natural_pool_sizes.append((len(raw_sequences), n_probes))
         assert len(raw_sequences) >= n_probes
         return (

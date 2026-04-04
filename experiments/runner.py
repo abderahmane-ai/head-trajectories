@@ -244,6 +244,32 @@ def _write_json(path: Path, payload: Dict) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _build_optional_natural_induction_probes(
+    raw_sequences: Sequence[List[int]],
+    n_probes: int,
+    block_size: int,
+    seed: int,
+) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    """Best-effort wrapper for the auxiliary natural-induction probe family."""
+
+    min_probes = max(4, n_probes // 2) if n_probes > 0 else 0
+    try:
+        return build_natural_induction_probes(
+            list(raw_sequences),
+            n_probes=n_probes,
+            block_size=block_size,
+            seed=seed,
+            allow_partial=True,
+            min_probes=min_probes,
+        )
+    except RuntimeError as exc:
+        print(
+            "  [WARNING] Skipping auxiliary natural induction probes: "
+            f"{exc}"
+        )
+        return None
+
+
 def _encode_split_texts(texts: Sequence[str], block_size: int) -> torch.Tensor:
     enc = get_tokenizer()
     flat_tokens: List[int] = []
@@ -433,13 +459,11 @@ def _build_hf_probe_dataset(
         block_size=profile.block_size,
         seed=seed,
     )
-    natural_induction_seqs, natural_induction_p1, natural_induction_p2 = (
-        build_natural_induction_probes(
-            pool_natural_induction,
-            n_probes=profile.n_induction,
-            block_size=profile.block_size,
-            seed=seed,
-        )
+    natural_built = _build_optional_natural_induction_probes(
+        pool_natural_induction,
+        n_probes=profile.n_induction,
+        block_size=profile.block_size,
+        seed=seed,
     )
     positional_seqs, positional_pairs = build_positional_probes(
         pool_positional,
@@ -450,9 +474,11 @@ def _build_hf_probe_dataset(
     probe_dict["induction_seqs"] = induction_seqs
     probe_dict["induction_p1"] = induction_p1
     probe_dict["induction_p2"] = induction_p2
-    probe_dict["natural_induction_seqs"] = natural_induction_seqs
-    probe_dict["natural_induction_p1"] = natural_induction_p1
-    probe_dict["natural_induction_p2"] = natural_induction_p2
+    if natural_built is not None:
+        natural_induction_seqs, natural_induction_p1, natural_induction_p2 = natural_built
+        probe_dict["natural_induction_seqs"] = natural_induction_seqs
+        probe_dict["natural_induction_p1"] = natural_induction_p1
+        probe_dict["natural_induction_p2"] = natural_induction_p2
     probe_dict["positional_seqs"] = positional_seqs
     probe_dict["positional_pairs"] = positional_pairs
 
@@ -473,15 +499,17 @@ def _build_hf_probe_dataset(
         probe_dict["heldout_induction_seqs"] = held_seqs
         probe_dict["heldout_induction_p1"] = held_p1
         probe_dict["heldout_induction_p2"] = held_p2
-        nat_held_seqs, nat_held_p1, nat_held_p2 = build_natural_induction_probes(
+        held_natural_built = _build_optional_natural_induction_probes(
             pool_natural_induction_holdout,
             n_probes=profile.n_induction_holdout,
             block_size=profile.block_size,
             seed=seed + 5000,
         )
-        probe_dict["heldout_natural_induction_seqs"] = nat_held_seqs
-        probe_dict["heldout_natural_induction_p1"] = nat_held_p1
-        probe_dict["heldout_natural_induction_p2"] = nat_held_p2
+        if held_natural_built is not None:
+            nat_held_seqs, nat_held_p1, nat_held_p2 = held_natural_built
+            probe_dict["heldout_natural_induction_seqs"] = nat_held_seqs
+            probe_dict["heldout_natural_induction_p1"] = nat_held_p1
+            probe_dict["heldout_natural_induction_p2"] = nat_held_p2
     if profile.n_pairs_holdout > 0:
         held_pos_seqs, held_pos_pairs = build_positional_probes(
             pool_positional_holdout,

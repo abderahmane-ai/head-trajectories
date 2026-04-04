@@ -1,5 +1,6 @@
 import torch
 
+from data.probe import build_natural_induction_probes
 from probing.scores import induction_score, natural_induction_score
 
 def test_perfect_induction():
@@ -93,6 +94,31 @@ def test_natural_induction_score_matches_core_metric():
     assert natural_induction_score(attn_head, induction_p1, induction_p2) == induction_score(
         attn_head, induction_p1, induction_p2
     )
+
+
+def test_build_natural_induction_probes_allow_partial_returns_partial_set():
+    raw_sequences = []
+    block_size = 64
+    for i in range(20):
+        seq = list(range(block_size))
+        if i < 6:
+            start1 = 5
+            start2 = 35
+            seq[start2 : start2 + 5] = seq[start1 : start1 + 5]
+        raw_sequences.append(seq)
+
+    seqs, p1, p2 = build_natural_induction_probes(
+        raw_sequences,
+        n_probes=10,
+        block_size=block_size,
+        seed=0,
+        allow_partial=True,
+        min_probes=4,
+    )
+
+    assert seqs.shape[0] == 6
+    assert p1.shape[0] == 6
+    assert p2.shape[0] == 6
 
 if __name__ == "__main__":
     test_perfect_induction()

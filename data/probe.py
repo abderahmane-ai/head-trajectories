@@ -222,14 +222,23 @@ def build_natural_induction_probes(
     min_distance: int = 20,
     block_size: int = 256,
     seed: int = 0,
+    allow_partial: bool = False,
+    min_probes: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Build induction probes from naturally occurring repeated subsequences.
 
+    If allow_partial=True, this returns as many probes as can be constructed,
+    provided at least min_probes succeed. This is intended for the auxiliary
+    natural-induction metric on smaller corpora where strict fixed-size
+    construction can be unnecessarily brittle.
+
     Returns:
-        natural_induction_seqs: (n_probes, block_size) int64
-        natural_induction_p1:   (n_probes,) int64
-        natural_induction_p2:   (n_probes,) int64
+        natural_induction_seqs: (M, block_size) int64
+        natural_induction_p1:   (M,) int64
+        natural_induction_p2:   (M,) int64
+        where M = n_probes unless allow_partial=True and the corpus cannot
+        support the requested count.
     """
 
     rng = random.Random(seed + 3000)
@@ -257,6 +266,18 @@ def build_natural_induction_probes(
             break
 
     if len(seqs) < n_probes:
+        required = 1 if min_probes is None else min_probes
+        if allow_partial and len(seqs) >= required:
+            print(
+                f"  Natural induction probes: built {len(seqs)}/{n_probes} "
+                f"from {attempts} candidates (partial success rate: "
+                f"{len(seqs) / attempts * 100:.1f}%)"
+            )
+            return (
+                torch.tensor(seqs, dtype=torch.long),
+                torch.tensor(p1s, dtype=torch.long),
+                torch.tensor(p2s, dtype=torch.long),
+            )
         raise RuntimeError(
             f"Only built {len(seqs)}/{n_probes} natural induction probes "
             f"from {attempts} candidate sequences."
@@ -272,6 +293,36 @@ def build_natural_induction_probes(
         torch.tensor(p1s, dtype=torch.long),
         torch.tensor(p2s, dtype=torch.long),
     )
+
+
+def _build_optional_natural_induction_probes(
+    raw_sequences: List[List[int]],
+    n_probes: int,
+    block_size: int,
+    seed: int,
+) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    """
+    Best-effort wrapper for the auxiliary natural-induction probe family.
+
+    Returns None when the corpus cannot support even a minimal partial set.
+    """
+
+    min_probes = max(4, n_probes // 2) if n_probes > 0 else 0
+    try:
+        return build_natural_induction_probes(
+            raw_sequences,
+            n_probes=n_probes,
+            block_size=block_size,
+            seed=seed,
+            allow_partial=True,
+            min_probes=min_probes,
+        )
+    except RuntimeError as exc:
+        print(
+            "  [WARNING] Skipping auxiliary natural induction probes: "
+            f"{exc}"
+        )
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -505,16 +556,18 @@ def build_probe_dataset(
     )
 
     print("\n  [4/6] Building natural induction probe sequences...")
-    natural_induction_seqs, natural_induction_p1, natural_induction_p2 = (
-        build_natural_induction_probes(
-            pool_natural_induction,
-            n_natural_induction,
-            (5, 10),
-            20,
-            block_size,
-            seed,
-        )
+    natural_built = _build_optional_natural_induction_probes(
+        pool_natural_induction,
+        n_natural_induction,
+        block_size,
+        seed,
     )
+    if natural_built is None:
+        natural_induction_seqs = None
+        natural_induction_p1 = None
+        natural_induction_p2 = None
+    else:
+        natural_induction_seqs, natural_induction_p1, natural_induction_p2 = natural_built
 
     print("\n  [5/6] Building positional probe sequences...")
     positional_seqs, positional_pairs = build_positional_probes(
@@ -551,18 +604,18 @@ def build_probe_dataset(
                 )
             )
         if n_natural_induction_holdout > 0:
-            (
-                heldout_natural_induction_seqs,
-                heldout_natural_induction_p1,
-                heldout_natural_induction_p2,
-            ) = build_natural_induction_probes(
+            natural_holdout_built = _build_optional_natural_induction_probes(
                 pool_natural_induction_holdout,
                 n_natural_induction_holdout,
-                (5, 10),
-                20,
                 block_size,
                 heldout_seed,
             )
+            if natural_holdout_built is not None:
+                (
+                    heldout_natural_induction_seqs,
+                    heldout_natural_induction_p1,
+                    heldout_natural_induction_p2,
+                ) = natural_holdout_built
         if n_pairs_holdout > 0:
             heldout_positional_seqs, heldout_positional_pairs = (
                 build_positional_probes(
@@ -576,15 +629,16 @@ def build_probe_dataset(
         "induction_seqs":    induction_seqs,      # (100, 256)
         "induction_p1":      induction_p1,        # (100,)
         "induction_p2":      induction_p2,        # (100,)
-        "natural_induction_seqs": natural_induction_seqs,
-        "natural_induction_p1": natural_induction_p1,
-        "natural_induction_p2": natural_induction_p2,
         "positional_seqs":   positional_seqs,     # (100, 256)
         "positional_pairs":  positional_pairs,    # (50, 2)
         "calibration_version": torch.tensor(CALIBRATION_VERSION, dtype=torch.long),
         "creation_seed":     torch.tensor(seed,        dtype=torch.long),
         "block_size":        torch.tensor(block_size,  dtype=torch.long),
     }
+    if natural_induction_seqs is not None:
+        probe_dict["natural_induction_seqs"] = natural_induction_seqs
+        probe_dict["natural_induction_p1"] = natural_induction_p1
+        probe_dict["natural_induction_p2"] = natural_induction_p2
 
     # Calibrate thresholds from random baseline (15M + 6M)
     print("\n  [7/7] Calibrating random-baseline thresholds...")

@@ -249,9 +249,6 @@ def run_probing_pipeline(
             "heldout_induction_seqs",
             "heldout_induction_p1",
             "heldout_induction_p2",
-            "heldout_natural_induction_seqs",
-            "heldout_natural_induction_p1",
-            "heldout_natural_induction_p2",
             "heldout_positional_seqs",
             "heldout_positional_pairs",
         }
@@ -265,9 +262,14 @@ def run_probing_pipeline(
         probe_view["induction_seqs"] = probe_dict["heldout_induction_seqs"]
         probe_view["induction_p1"] = probe_dict["heldout_induction_p1"]
         probe_view["induction_p2"] = probe_dict["heldout_induction_p2"]
-        probe_view["natural_induction_seqs"] = probe_dict["heldout_natural_induction_seqs"]
-        probe_view["natural_induction_p1"] = probe_dict["heldout_natural_induction_p1"]
-        probe_view["natural_induction_p2"] = probe_dict["heldout_natural_induction_p2"]
+        if {
+            "heldout_natural_induction_seqs",
+            "heldout_natural_induction_p1",
+            "heldout_natural_induction_p2",
+        }.issubset(probe_dict.keys()):
+            probe_view["natural_induction_seqs"] = probe_dict["heldout_natural_induction_seqs"]
+            probe_view["natural_induction_p1"] = probe_dict["heldout_natural_induction_p1"]
+            probe_view["natural_induction_p2"] = probe_dict["heldout_natural_induction_p2"]
         probe_view["positional_seqs"] = probe_dict["heldout_positional_seqs"]
         probe_view["positional_pairs"] = probe_dict["heldout_positional_pairs"]
         probe_dict = probe_view
