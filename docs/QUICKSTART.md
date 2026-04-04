@@ -164,8 +164,8 @@ Generating figures...
 
 Figures saved to figures/:
   - fig1_timeline.png
-  - fig2a_heatmap_dominant.png
-  - fig3_phase_transition.png
+  - fig2_heatmap_spec.png
+  - fig3_mixed_behavior.png
   - fig4_stability.png
 
 Hypothesis verdicts:

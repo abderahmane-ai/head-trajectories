@@ -81,6 +81,7 @@ def compute_global_curves(
         "mean": mean,
         "std": std,
         "per_seed": per_seed,
+        "seed_labels": [str(result.get("seed", idx)) for idx, result in enumerate(run_results)],
         "type_names": type_names,
         "curve_mode": "dominance",
     }
@@ -112,6 +113,7 @@ def compute_activation_curves(
         "mean": mean,
         "std": std,
         "per_seed": per_seed,
+        "seed_labels": [str(result.get("seed", idx)) for idx, result in enumerate(run_results)],
         "type_names": behavior_names,
         "curve_mode": "activation",
     }
@@ -331,6 +333,7 @@ def compute_mixed_behavior_summary(
 
     return {
         "steps": steps,
+        "n_runs": len(run_results),
         "fraction_ge2_mean": ge2.mean(axis=0),
         "fraction_ge2_std": ge2.std(axis=0) if ge2.shape[0] > 1 else np.zeros_like(ge2[0]),
         "fraction_ge3_mean": ge3.mean(axis=0),

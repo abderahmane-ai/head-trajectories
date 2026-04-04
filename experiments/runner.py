@@ -56,13 +56,10 @@ from probing.pipeline import run_probing_pipeline
 from training import Trainer, save_checkpoint
 from training.scheduler import CosineScheduler
 from visualization import (
-    plot_discontinuity_comparison,
-    plot_dominant_type_heatmap,
-    plot_individual_trajectories,
-    plot_phase_transition,
+    plot_activation_dominance_figure,
+    plot_mixed_behavior_figure,
     plot_specialization_fraction_heatmap,
     plot_stability_figure,
-    plot_timeline,
 )
 
 
@@ -1025,31 +1022,28 @@ def analyze_single_run(
         else None
     )
 
-    timeline_path = paths.figures_dir / f"timeline_seed{seed}.png"
-    dominant_heatmap_path = paths.figures_dir / f"dominant_type_heatmap_seed{seed}.png"
+    overview_path = paths.figures_dir / f"timeline_seed{seed}.png"
     specialization_heatmap_path = paths.figures_dir / f"specialization_heatmap_seed{seed}.png"
+    mixed_behavior_path = paths.figures_dir / f"mixed_behavior_seed{seed}.png"
     stability_path = paths.figures_dir / f"stability_seed{seed}.png"
-    trajectories_path = paths.figures_dir / f"trajectories_seed{seed}.png"
-    phase_path = paths.figures_dir / f"phase_transition_seed{seed}.png"
-    discontinuity_path = paths.figures_dir / f"discontinuity_zoom_seed{seed}.png"
 
-    plot_timeline(
+    plot_activation_dominance_figure(
+        activation_curves,
         global_curves,
-        timeline_path,
-        onset_steps=learned_onset_steps,
-        log_x=True,
-        show_undiff=True,
-        title=f"Head Trajectories — {profile_obj.name} / seed {seed}",
-    )
-    plot_dominant_type_heatmap(
-        per_layer_curves,
-        dominant_heatmap_path,
-        title=f"Dominant Head Type — {profile_obj.name} / seed {seed}",
+        overview_path,
+        activation_onsets=activation_onset_steps,
+        dominance_onsets=learned_onset_steps,
+        title=f"Behavior Emergence — {profile_obj.name} / seed {seed}",
     )
     plot_specialization_fraction_heatmap(
         per_layer_curves,
         specialization_heatmap_path,
         title=f"Specialization Fraction — {profile_obj.name} / seed {seed}",
+    )
+    plot_mixed_behavior_figure(
+        mixed_behavior,
+        mixed_behavior_path,
+        title=f"Mixed Behavior — {profile_obj.name} / seed {seed}",
     )
     plot_stability_figure(
         hist_data,
@@ -1058,22 +1052,6 @@ def analyze_single_run(
         stability_path,
         title=f"Stability Analysis — {profile_obj.name} / seed {seed}",
     )
-    plot_individual_trajectories(
-        interesting,
-        results["step_index"],
-        trajectories_path,
-        max_heads=16,
-        title=f"Individual Trajectories — {profile_obj.name} / seed {seed}",
-    )
-    plot_phase_transition(
-        induction_curve,
-        val_loss_curve,
-        crossing_steps,
-        inflection_result=inflection_25,
-        output_path=phase_path,
-        title=f"Induction Emergence vs Val Loss — {profile_obj.name} / seed {seed}",
-    )
-    plot_discontinuity_comparison(induction_curve, discontinuity_path)
 
     final_fractions = {
         head_type: float(global_curves["mean"][-1, idx])
@@ -1129,13 +1107,11 @@ def analyze_single_run(
         ][:16],
         "results_path": str(paths.results_path),
         "figures": {
-            "timeline": str(timeline_path),
-            "dominant_type_heatmap": str(dominant_heatmap_path),
+            "overview": str(overview_path),
+            "timeline": str(overview_path),
             "specialization_heatmap": str(specialization_heatmap_path),
+            "mixed_behavior": str(mixed_behavior_path),
             "stability": str(stability_path),
-            "trajectories": str(trajectories_path),
-            "phase_transition": str(phase_path),
-            "discontinuity_zoom": str(discontinuity_path),
         },
     }
     _write_json(paths.summary_path, summary)
@@ -1205,16 +1181,41 @@ def analyze_profile_group(
 
     aggregate_dir = artifact_root_path / profile_obj.name / "aggregate"
     aggregate_dir.mkdir(parents=True, exist_ok=True)
-    figure_path = aggregate_dir / "timeline_multi_seed.png"
+    overview_path = aggregate_dir / "timeline_multi_seed.png"
+    specialization_heatmap_path = aggregate_dir / "specialization_multi_seed.png"
+    mixed_behavior_path = aggregate_dir / "mixed_behavior_multi_seed.png"
+    stability_path = aggregate_dir / "stability_multi_seed.png"
     summary_path = aggregate_dir / "summary_multi_seed.json"
 
-    plot_timeline(
+    change_matrix = compute_type_change_matrix(run_results)
+    sink_persistence = compute_sink_persistence(run_results)
+    hist_data = compute_stability_histogram(change_matrix)
+    per_type_stability = compute_per_type_stability(run_results, change_matrix)
+
+    plot_activation_dominance_figure(
+        activation_curves,
         global_curves,
-        figure_path,
-        onset_steps=learned_onset_steps,
-        log_x=True,
-        show_undiff=True,
-        title=f"Head Trajectories — {profile_obj.name} / {len(included_seeds)} seeds",
+        overview_path,
+        activation_onsets=activation_onset_steps,
+        dominance_onsets=learned_onset_steps,
+        title=f"Behavior Emergence — {profile_obj.name} / {len(included_seeds)} seeds",
+    )
+    plot_specialization_fraction_heatmap(
+        per_layer_curves,
+        specialization_heatmap_path,
+        title=f"Specialization Fraction — {profile_obj.name} / {len(included_seeds)} seeds",
+    )
+    plot_mixed_behavior_figure(
+        mixed_behavior,
+        mixed_behavior_path,
+        title=f"Mixed Behavior — {profile_obj.name} / {len(included_seeds)} seeds",
+    )
+    plot_stability_figure(
+        hist_data,
+        sink_persistence,
+        per_type_stability,
+        stability_path,
+        title=f"Stability Analysis — {profile_obj.name} / {len(included_seeds)} seeds",
     )
 
     final_fractions = {
@@ -1252,7 +1253,10 @@ def analyze_profile_group(
             else None
         ),
         "layer_count": int(per_layer_curves["n_layers"]),
-        "timeline_figure": str(figure_path),
+        "timeline_figure": str(overview_path),
+        "specialization_heatmap_figure": str(specialization_heatmap_path),
+        "mixed_behavior_figure": str(mixed_behavior_path),
+        "stability_figure": str(stability_path),
         "summary_path": str(summary_path),
     }
     _write_json(summary_path, summary)

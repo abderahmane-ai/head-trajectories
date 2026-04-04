@@ -14,14 +14,13 @@ Usage:
 
 Output figures:
     figures/
-        fig1_timeline.png               Main developmental timeline (Figure 1)
+        fig1_timeline.png               Activation + dominance overview
         fig1b_timeline_per_seed.png     Per-seed supplement
-        fig2a_heatmap_dominant.png      Dominant type heatmap (Figure 2a)
-        fig2b_heatmap_spec.png          Specialization fraction heatmap (Figure 2b)
-        fig3_phase_transition.png       Induction phase transition (Figure 3)
-        fig3b_discontinuity_zoom.png    Zoomed discontinuity supplement
-        fig4_stability.png              Stability analysis (Figure 4)
-        fig4b_trajectories.png          Individual head trajectories supplement
+        fig2_heatmap_spec.png           Specialization fraction heatmap
+        fig3_mixed_behavior.png         Mixed-behavior structure
+        fig4_stability.png              Stability analysis
+        figS_phase_transition.png       Induction supplement
+        figS_trajectories.png           Individual-head supplement
 """
 
 import argparse
@@ -61,12 +60,11 @@ from analysis import (
     print_controls_report,
 )
 from visualization import (
-    plot_timeline,
+    plot_activation_dominance_figure,
+    plot_mixed_behavior_figure,
     plot_timeline_per_seed,
-    plot_dominant_type_heatmap,
     plot_specialization_fraction_heatmap,
     plot_phase_transition,
-    plot_discontinuity_comparison,
     plot_stability_figure,
     plot_individual_trajectories,
 )
@@ -261,13 +259,14 @@ def main() -> None:
         seed=primary_results[0]["seed"],
     )
 
-    # Figure 1: main timeline
-    plot_timeline(
+    # Figure 1: activation + dominance overview
+    plot_activation_dominance_figure(
+        activation_curves,
         global_curves,
         args.figures_dir / "fig1_timeline.png",
-        onset_steps=onset_steps,
-        log_x=True,
-        show_undiff=True,
+        activation_onsets=activation_onset_steps,
+        dominance_onsets=learned_onset_steps,
+        title="Behavior Emergence Over Training",
     )
 
     # Figure 1b: per-seed supplement
@@ -276,16 +275,10 @@ def main() -> None:
         args.figures_dir / "fig1b_timeline_per_seed.png",
     )
 
-    # Figure 2a: dominant type heatmap
-    plot_dominant_type_heatmap(
-        per_layer_curves,
-        args.figures_dir / "fig2a_heatmap_dominant.png",
-    )
-
-    # Figure 2b: specialization fraction heatmap
+    # Figure 2: specialization fraction heatmap
     plot_specialization_fraction_heatmap(
         per_layer_curves,
-        args.figures_dir / "fig2b_heatmap_spec.png",
+        args.figures_dir / "fig2_heatmap_spec.png",
     )
 
     # Ablation heatmap (if available)
@@ -293,9 +286,16 @@ def main() -> None:
         ablation_plc = compute_per_layer_curves([ablation_result])
         plot_specialization_fraction_heatmap(
             ablation_plc,
-            args.figures_dir / "fig2c_heatmap_spec_ablation.png",
+            args.figures_dir / "figS_ablation_heatmap.png",
             title="Specialization Fraction — 6M Ablation Model",
         )
+
+    # Figure 3: mixed-behavior overlap
+    plot_mixed_behavior_figure(
+        mixed_behavior,
+        args.figures_dir / "fig3_mixed_behavior.png",
+        title="Mixed-Behavior Structure",
+    )
 
     # ─────────────────────────────────────────────────────────────────────────
     # SECTION 2 — Stability Analysis
@@ -319,13 +319,13 @@ def main() -> None:
         args.figures_dir / "fig4_stability.png",
     )
 
-    # Figure 4b: individual trajectories (most interesting heads from seed 0)
+    # Supplementary: individual trajectories
     trajs_seed0   = compute_head_trajectories(primary_results[0])
     interesting   = find_interesting_trajectories(trajs_seed0, min_type_changes=2)
     plot_individual_trajectories(
         interesting,
         primary_results[0]["step_index"],
-        args.figures_dir / "fig4b_trajectories.png",
+        args.figures_dir / "figS_trajectories.png",
         max_heads=16,
     )
 
@@ -403,19 +403,13 @@ def main() -> None:
     if semantic_defined_fractions:
         print(f"  Semantic defined-head fraction (final): {float(np.mean(semantic_defined_fractions)):.4f}")
 
-    # Figure 3: phase transition dual-axis plot
+    # Supplementary: induction phase-transition view
     plot_phase_transition(
         induction_curve,
         val_loss_curve,
         crossing_steps,
         inflection_result=inflection_25,
-        output_path=args.figures_dir / "fig3_phase_transition.png",
-    )
-
-    # Figure 3b: discontinuity zoom
-    plot_discontinuity_comparison(
-        induction_curve,
-        args.figures_dir / "fig3b_discontinuity_zoom.png",
+        output_path=args.figures_dir / "figS_phase_transition.png",
     )
 
     # ─────────────────────────────────────────────────────────────────────────

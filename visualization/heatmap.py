@@ -1,14 +1,12 @@
 """
 visualization/heatmap.py — Layer × checkpoint heatmap of head type specialization.
 
-Produces Figure 2: a grid of (training_step × layer) where each cell is colored
-by the dominant head type in that layer at that step. This is the primary
-visualization for H3 (layer stratification hypothesis) — if lower layers
-specialize earlier, you expect a wave of color propagating upward over time.
+Produces a grid of (training_step × layer) summaries used to inspect
+specialization structure across depth.
 
 Two variants:
-  1. Dominant type heatmap — one color per cell = most common non-UNDIFF type
-  2. Specialization fraction heatmap — one value per cell = 1 - UNDIFF fraction
+  1. Dominant type heatmap — one color per cell = most common specialized type
+  2. Specialization fraction heatmap — one value per cell = 1 - nonspecialized fraction
 """
 
 import numpy as np
@@ -41,7 +39,7 @@ def _dominant_type_per_cell(
 ) -> np.ndarray:
     """
     For each (layer, ckpt) cell, return the index of the most common
-    non-UNDIFF head type. Returns 0 (UNDIFF) if no non-UNDIFF type
+    specialized head type. Returns 0 if no specialized type
     exceeds 15% of heads in that layer at that step.
 
     Args:
@@ -78,9 +76,9 @@ def plot_dominant_type_heatmap(
     """
     Plot the dominant head type heatmap.
 
-    X-axis: training step (log scale)
+    X-axis: training step (quasi-log spacing)
     Y-axis: layer index (0 = bottom)
-    Color:  dominant non-UNDIFF head type in that layer at that step
+    Color:  dominant specialized head type in that layer at that step
 
     Args:
         per_layer_curves: output of compute_per_layer_curves
@@ -176,7 +174,7 @@ def plot_specialization_fraction_heatmap(
     title:            str = "Fraction of Specialized Heads by Layer and Training Step",
 ) -> None:
     """
-    Plot a continuous heatmap showing 1 - UNDIFF fraction per (layer, step).
+    Plot a continuous heatmap showing the specialized fraction per (layer, step).
 
     Warmer colors = more specialized. This is a cleaner visualization for
     testing H3 since it shows the wave of specialization propagating through layers.
@@ -216,7 +214,7 @@ def plot_specialization_fraction_heatmap(
     )
 
     cbar = fig.colorbar(mesh, ax=ax, fraction=0.025, pad=0.02)
-    cbar.set_label("Fraction specialized (non-UNDIFF)", fontsize=9)
+    cbar.set_label("Fraction specialized", fontsize=9)
     cbar.ax.tick_params(labelsize=8)
 
     ax.set_xlabel("Training step", fontsize=11)
