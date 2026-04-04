@@ -519,49 +519,52 @@ the observed score vector for a head.
 
 \subsection{Safe threshold handling}
 
-Thresholds are validated before normalization. Non-finite thresholds are
-rejected. If a threshold is non-positive, it is preserved in recorded raw
-diagnostics but replaced by a small positive floor \emph{only for division}:
-\[
-\tau_m^{\mathrm{eff}} =
-\begin{cases}
-\tau_m, & \tau_m > 0, \\
-\varepsilon, & \tau_m \le 0,
-\end{cases}
-\qquad \varepsilon = 10^{-6}.
-\]
-
-This is a defensive numerical fallback, not the intended scientific state.
+Threshold summaries are still stored for diagnostics and legacy compatibility,
+but the primary classifier gate is now statistical inference against the pooled
+empirical null distribution.
 
 \subsection{Decision rule}
 
-Define normalized scores
+For score vector $s=(s_1,\dots,s_5)$ and pooled null samples, we compute
+one-sided empirical p-values:
 \[
-z_m = \frac{s_m}{\tau_m^{\mathrm{eff}}}.
+p_m = \Pr_{\mathrm{null}}(r_m \ge s_m).
 \]
-The label set is
+
+Per head and checkpoint, BH-FDR is applied across the five metrics at level
+$\alpha$ to define the active behavior set:
+\[
+\mathcal{A} = \{m \in \{1,\dots,5\} : p_m \text{ survives BH-FDR}\}.
+\]
+
+For dominant summarization, effect sizes are
+\[
+e_m = -\log_{10}(p_m).
+\]
+Let $e_{(1)} \ge e_{(2)}$ be the top two active effect sizes and
+\[
+\Delta = e_{(1)} - e_{(2)}.
+\]
+The dominant-summary label set is
 \[
 \mathcal{Y}
 =
-\{\texttt{UNDIFFERENTIATED},\texttt{SINK},\texttt{PREV\_TOKEN},
+\{\texttt{WEAK},\texttt{AMBIGUOUS},\texttt{SINK},\texttt{PREV\_TOKEN},
 \texttt{INDUCTION},\texttt{POSITIONAL},\texttt{SEMANTIC}\}.
 \]
 
-The classifier is
+Classifier:
 \[
 \mathrm{label}(s)
 =
 \begin{cases}
-\texttt{UNDIFFERENTIATED}, & s_m < \tau_m \;\; \forall m, \\
-\texttt{UNDIFFERENTIATED}, & z_{(1)} - z_{(2)} < \delta, \\
-\arg\max_m z_m, & \text{otherwise,}
+\texttt{WEAK}, & \mathcal{A}=\varnothing, \\
+\texttt{AMBIGUOUS}, & |\mathcal{A}|>1 \land \Delta < \delta, \\
+\arg\max_{m \in \mathcal{A}} e_m, & \text{otherwise.}
 \end{cases}
 \]
-where $z_{(1)} \ge z_{(2)} \ge \cdots$ are the sorted normalized scores and
-\[
-\delta = 0.05
-\]
-is the tie tolerance.
+
+This keeps detection (active set) and summarization (dominant label) separate.
 
 \section{Trajectory-Level Analysis}
 

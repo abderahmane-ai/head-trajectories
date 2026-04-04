@@ -19,7 +19,7 @@ import torch
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from probing import HEAD_TYPES, LABEL_SINK, LABEL_UNDIFF
+from probing import HEAD_TYPES, LABEL_SINK
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -275,7 +275,7 @@ def print_stability_report(
     print(f"\n  Mean type changes by final head type:")
     print(f"  {'─' * 50}")
     for type_name, stats in per_type_stab.items():
-        if type_name == "UNDIFFERENTIATED":
+        if type_name in {"WEAK", "AMBIGUOUS", "UNDIFFERENTIATED"}:
             continue
         n = stats["n_heads"]
         m = stats["mean_changes"]

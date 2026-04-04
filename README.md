@@ -8,7 +8,7 @@
 
 Most interpretability work asks *what* attention heads do after training. This project asks *when* they become what they are. We train transformers from scratch with dense checkpointing, probe every head at every checkpoint, and track developmental trajectories from initialization to convergence.
 
-**Current evidence:** The pipeline is stable, but the strongest current empirical result is more modest than the original hypothesis framing: final head-type mixes are dataset-sensitive, `PREV_TOKEN` is usually the clearest dominant learned behavior, `SEMANTIC` can appear early and remains calibration-sensitive, and many heads exhibit mixed behaviors in raw scores even when the classifier assigns a single dominant label.
+**Current evidence:** The pipeline is stable, and the current methodology now uses **FDR-based multi-behavior inference** rather than heuristic threshold-normalized winner-take-all labeling. The strongest current empirical result remains that final head-type mixes are dataset-sensitive, `PREV_TOKEN` is usually the clearest dominant learned behavior, `SEMANTIC` can appear early and remains calibration-sensitive, and many heads exhibit multiple statistically active behaviors even when the report view assigns one dominant summary label.
 
 ## Quick Start
 
@@ -41,7 +41,7 @@ Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 - **POSITIONAL**: Content-invariant attention (KL divergence)
 - **SEMANTIC**: Alignment with embedding similarity (masked)
 
-**Classification:** Thresholds are calibrated from a causally scrambled random baseline. `SINK`, `PREV_TOKEN`, `INDUCTION`, and `POSITIONAL` use `mean + 2σ`; `SEMANTIC` uses the null `p99` because its per-head null variance collapses after averaging. Heads are classified by `argmax(scores / thresholds)` with a conservative tie tolerance, and the results file now also stores threshold flags, normalized scores, runner-up behavior, dominant margin, and behavior-count metadata for mixed-behavior analysis.
+**Classification:** Thresholds are still calibrated from a causally scrambled random baseline, but they are now diagnostic/reference quantities rather than the main decision rule. The classifier uses the **pooled empirical null**, computes one-sided empirical p-values per metric, applies **per-head BH-FDR** across the five behaviors, treats the surviving metrics as the head’s **active behavior set**, and then assigns a dominant summary label only if one surviving behavior clears a fixed effect-size margin. Non-specialized states are now split into `WEAK` (no behaviors survive) and `AMBIGUOUS` (multiple survive without a clear winner).
 
 See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 
@@ -55,7 +55,7 @@ The repository evaluates five canonical hypotheses:
 **H4 (Induction Phase Transition):** Induction emergence is abrupt rather than gradual  
 **H5 (Sink Persistence):** Heads that become sinks remain sinks for most subsequent checkpoints
 
-**Current status:** Single-seed comparison runs do **not** support strong `H1` or `H2` claims. The clearest current result is that final behavioral mixes differ substantially across datasets, especially in the balance between `PREV_TOKEN` and `SEMANTIC`. Raw scores also show widespread mixed-behavior heads, so dominant labels should be read as summaries rather than full identities.
+**Current status:** Single-seed comparison runs do **not** support strong `H1` or `H2` claims. The clearest current result is that final behavioral mixes differ substantially across datasets, especially in the balance between `PREV_TOKEN` and `SEMANTIC`. The new FDR-based active-set view also confirms widespread mixed-behavior heads, so dominant labels should be read as summaries rather than full identities.
 
 ## Repository Structure
 

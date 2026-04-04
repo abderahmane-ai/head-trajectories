@@ -32,7 +32,7 @@ METRIC_NAMES: Tuple[str, ...] = (
     "POSITIONAL",
     "SEMANTIC",
 )
-CALIBRATION_VERSION: int = 3
+CALIBRATION_VERSION: int = 4
 SEMANTIC_METRIC_INDEX: int = 4
 SEMANTIC_THRESHOLD_QUANTILE: float = 0.99
 DEFAULT_THRESHOLD_RULES: Tuple[str, ...] = (
@@ -42,6 +42,41 @@ DEFAULT_THRESHOLD_RULES: Tuple[str, ...] = (
     "mean_plus_2std",
     f"quantile_{SEMANTIC_THRESHOLD_QUANTILE:.2f}",
 )
+
+
+def empirical_null_p_values(
+    scores: np.ndarray,
+    pooled_null_scores: np.ndarray,
+) -> np.ndarray:
+    """
+    Compute one-sided empirical p-values P(null >= observed) per metric.
+
+    This is the primary statistical gate used by the FDR-based classifier.
+    Threshold summaries remain available for diagnostics and legacy analysis.
+    """
+
+    score_arr = np.asarray(scores, dtype=np.float32)
+    null_arr = np.asarray(pooled_null_scores, dtype=np.float32)
+    if score_arr.shape != (5,):
+        raise ValueError(f"scores must be shape (5,), got {score_arr.shape}")
+    if null_arr.ndim != 2 or null_arr.shape[1] != 5:
+        raise ValueError(
+            "pooled_null_scores must have shape (n_null_samples, 5), "
+            f"got {null_arr.shape}"
+        )
+    exceedances = (null_arr >= score_arr[None, :]).sum(axis=0).astype(np.float32)
+    return (exceedances + 1.0) / float(null_arr.shape[0] + 1)
+
+
+def empirical_null_effect_sizes(
+    p_values: np.ndarray,
+) -> np.ndarray:
+    """Convert empirical p-values into null-relative surprise effect sizes."""
+
+    p_arr = np.asarray(p_values, dtype=np.float32)
+    if p_arr.shape != (5,):
+        raise ValueError(f"p_values must be shape (5,), got {p_arr.shape}")
+    return -np.log10(np.clip(p_arr, 1e-12, 1.0))
 
 
 @torch.no_grad()

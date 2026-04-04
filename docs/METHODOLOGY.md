@@ -1,6 +1,6 @@
 # Methodology and Mathematical Specification
 
-This document gives a formal, end-to-end description of the **Head Trajectories** project: the scientific question, the experimental pipeline, the probe dataset, the five head-behavior scores, threshold calibration, classification, and the trajectory analyses derived from those labels.
+This document gives a formal, end-to-end description of the **Head Trajectories** project: the scientific question, the experimental pipeline, the probe dataset, the five head-behavior scores, null calibration, statistical classification, and the trajectory analyses derived from those outputs.
 
 It is the mathematical companion to:
 
@@ -21,13 +21,19 @@ The project operationalizes this question by:
 2. Saving checkpoints throughout training, especially densely early on.
 3. Running a fixed held-out probe dataset through every checkpoint.
 4. Scoring every attention head on five interpretable behaviors.
-5. Classifying each head at each checkpoint.
-6. Tracking each head’s label sequence over time.
+5. Inferring each head’s active behavior set and dominant summary at each checkpoint.
+6. Tracking activation and dominance trajectories over time.
 
-The resulting object is a **trajectory** for each head:
+The resulting objects are trajectories for each head:
 
 $$
-(\text{label at step } t_1,\ \text{label at step } t_2,\ \dots,\ \text{label at step } t_K).
+(\text{active set at step } t_1,\ \text{active set at step } t_2,\ \dots,\ \text{active set at step } t_K)
+$$
+
+and, for visualization/reporting,
+
+$$
+(\text{dominant summary at step } t_1,\ \text{dominant summary at step } t_2,\ \dots,\ \text{dominant summary at step } t_K).
 $$
 
 ---
@@ -56,12 +62,19 @@ More concretely:
 
 ### Classification phase
 
-- Scores are compared against calibrated thresholds.
-- The full raw score tensor is preserved in results files; the categorical label is a summary layer rather than the only retained representation.
-- Each head is assigned one of six labels:
+- Scores are compared against the **pooled empirical null distribution**, not only against scalar thresholds.
+- The results file preserves the full raw score tensor, active-behavior mask, empirical p-values, null-relative effect sizes, runner-up behavior, dominant margin, and dominant-summary label tensor.
+- The dominant-summary label space is now:
 
 $$
-\mathcal{Y} = \{\texttt{UNDIFFERENTIATED},\ \texttt{SINK},\ \texttt{PREV\_TOKEN},\ \texttt{INDUCTION},\ \texttt{POSITIONAL},\ \texttt{SEMANTIC}\}.
+\mathcal{Y} = \{\texttt{WEAK},\ \texttt{AMBIGUOUS},\ \texttt{SINK},\ \texttt{PREV\_TOKEN},\ \texttt{INDUCTION},\ \texttt{POSITIONAL},\ \texttt{SEMANTIC}\}.
+$$
+
+- The primary scientific state, however, is the active behavior set:
+
+$$
+\mathcal{A}^{(k,\ell,h)} \subseteq
+\{\texttt{SINK},\ \texttt{PREV\_TOKEN},\ \texttt{INDUCTION},\ \texttt{POSITIONAL},\ \texttt{SEMANTIC}\}.
 $$
 
 ### Analysis phase
@@ -496,124 +509,97 @@ The final threshold vector used in the main pipeline is the mean threshold acros
 
 ## 7. Head Classification Rule
 
-Given a real checkpoint score vector
+Under the current default methodology, head classification is a statistical
+inference pipeline built on the empirical null distribution.
+
+Given a checkpoint score vector:
 
 $$
-s = (s_1,\dots,s_5)
+s = (s_1,\dots,s_5),
 $$
 
-and threshold vector
+and pooled null samples for each metric, compute one-sided empirical p-values:
 
 $$
-\tau = (\tau_1,\dots,\tau_5),
+p_m = \Pr_{\text{null}}(r_m \ge s_m).
 $$
 
-define normalized scores:
+### 7.1 Active-set detection via BH-FDR
+
+For one head at one checkpoint, apply Benjamini-Hochberg FDR correction across
+the five metric p-values at level $\alpha$:
 
 $$
-z_m = \frac{s_m}{\tau_m}.
+\mathcal{A} = \{m \in \{1,\dots,5\}: p_m \text{ survives BH-FDR}\}.
 $$
 
-In implementation, the classifier validates thresholds before normalization. Non-finite thresholds are rejected. Non-positive thresholds are preserved as raw calibration outputs for reporting, but are replaced by a small positive floor **only for safe division**. The below-threshold check still uses the raw calibrated thresholds.
+$\mathcal{A}$ is the head’s **active behavior set**.
 
-The classification rule is:
+### 7.2 Effect-size ranking and dominant summary
 
-### Case 1: all scores below threshold
-
-If
+For summary ranking, transform p-values to null-relative effect sizes:
 
 $$
-s_m < \tau_m \quad \forall m,
+e_m = -\log_{10}(p_m).
 $$
 
-then the head is classified as
+Among active behaviors, let $e_{(1)} \ge e_{(2)}$ be the top two effect sizes,
+with dominance margin:
 
 $$
-\texttt{UNDIFFERENTIATED}.
+\Delta = e_{(1)} - e_{(2)}.
 $$
 
-### Case 2: ambiguous winner
-
-Let $z_{(1)} \ge z_{(2)} \ge \dots $ be the sorted normalized scores.
-
-If
+The dominant summary label is then assigned as:
 
 $$
-z_{(1)} - z_{(2)} < \delta,
-$$
-
-with tie tolerance
-
-$$
-\delta = 0.05,
-$$
-
-then the head is also classified as
-
-$$
-\texttt{UNDIFFERENTIATED},
-$$
-
-and the tie is logged.
-
-### Current interpretation note
-
-Under the current default methodology, this six-label rule remains the active classifier because it preserves comparability across the current WikiText and LM1B baselines. However, the current empirical baselines also show that many heads have multiple behaviors above threshold simultaneously. The next intended methodology change is therefore **not** a score rewrite, but a richer classification/reporting layer that preserves the current five scores and thresholding scheme while surfacing:
-
-- `WEAK` versus `AMBIGUOUS` non-specialized states
-- dominant behavior plus runner-up behavior
-- dominant margin
-- number of behaviors above threshold
-
-### Case 3: clear winner
-
-Otherwise, assign the label corresponding to:
-
-$$
-\arg\max_m z_m.
-$$
-
-So the classifier is:
-
-$$
-\text{label}(s)
-=
+\text{label}(s)=
 \begin{cases}
-\texttt{UNDIFFERENTIATED}, & s_m < \tau_m \ \forall m, \\
-\texttt{UNDIFFERENTIATED}, & z_{(1)} - z_{(2)} < \delta, \\
-\arg\max_m z_m, & \text{otherwise.}
+\texttt{WEAK}, & \mathcal{A}=\varnothing,\\
+\texttt{AMBIGUOUS}, & |\mathcal{A}|>1 \text{ and } \Delta < \delta,\\
+\arg\max_{m\in\mathcal{A}} e_m, & \text{otherwise.}
 \end{cases}
 $$
 
-In addition to the dominant categorical label, the saved results now retain:
+where $\delta$ is a fixed dominance-margin threshold.
+
+### 7.3 Label space and saved outputs
+
+Dominant-summary label space:
+
+$$
+\mathcal{Y}=
+\{\texttt{WEAK},\ \texttt{AMBIGUOUS},\ \texttt{SINK},\ \texttt{PREV\_TOKEN},\ \texttt{INDUCTION},\ \texttt{POSITIONAL},\ \texttt{SEMANTIC}\}.
+$$
+
+Saved result tensors include:
 
 - raw score vectors
-- threshold-presence flags
-- threshold-normalized scores
-- runner-up behavior identity
-- dominant-vs-runner-up margin
-- number of behaviors above threshold
+- active-behavior masks
+- empirical p-values
+- effect-size tensors
+- dominant labels
+- primary and runner-up behaviors
+- dominant margins
+- active-behavior counts
 
-These metadata make mixed-behavior analysis possible without changing the core dominant-label classifier.
+Threshold summaries (`mean+2std`/`p99`) are still stored as diagnostic/reference
+metadata and for legacy file compatibility, but they are no longer the primary
+classification gate.
 
 ---
 
 ## 8. Trajectories
 
-Once every head is classified at every checkpoint, the central object of the project is the label trajectory:
+Once every head has both active-set and dominant-summary outputs at every
+checkpoint, the project analyzes two trajectory spaces:
 
-$$
-y^{(\ell,h)} =
-\bigl(
-y^{(\ell,h)}_1,\ y^{(\ell,h)}_2,\ \dots,\ y^{(\ell,h)}_K
-\bigr).
-$$
+1. **Activation trajectories** over active-set membership
+2. **Dominance trajectories** over dominant summary labels
 
-This supports several levels of analysis.
+### 8.1 Dominance global curves
 
-### 8.1 Global curves
-
-For type $c \in \mathcal{Y}$, define the fraction of heads of type $c$ at checkpoint $k$:
+For dominant type $c \in \mathcal{Y}$, define:
 
 $$
 f_{k,c}
@@ -625,7 +611,19 @@ $$
 
 Across multiple seeds, these are averaged to yield mean and standard deviation bands.
 
-### 8.1.1 Onset confidence intervals
+### 8.1.1 Activation global curves
+
+For behavior $m \in \{\texttt{SINK},\texttt{PREV\_TOKEN},\texttt{INDUCTION},\texttt{POSITIONAL},\texttt{SEMANTIC}\}$:
+
+$$
+a_{k,m}
+=
+\frac{1}{LH}
+\sum_{\ell=1}^{L}\sum_{h=1}^{H}
+\mathbf{1}\{m \in \mathcal{A}^{(\ell,h)}_k\}.
+$$
+
+### 8.1.2 Onset confidence intervals
 
 Onset steps are point estimates derived from the fraction curves. To quantify uncertainty, the analysis now also supports bootstrap confidence intervals:
 
@@ -664,15 +662,18 @@ This quantifies stability versus re-specialization.
 
 ### 8.4 Mixed behavior and label compression
 
-The dominant-label view is intentionally lossy. A head can exceed threshold for multiple behaviors at once, yet still receive a single categorical label because the classifier chooses the largest threshold-normalized score when there is a clear winner.
+The dominant-label view is intentionally lossy. A head can have multiple
+FDR-active behaviors at once, yet still receive a single dominant summary label.
 
 This means:
 
-- `UNDIFFERENTIATED` includes both weak heads and ambiguous near-ties
-- a head labeled `PREV_TOKEN` can still have substantial `SINK` or `SEMANTIC` signal
-- dominant labels are useful for visualization, but raw scores and threshold-presence analyses are often needed to interpret behavioral overlap
+- `WEAK` and `AMBIGUOUS` are distinct non-specialized states
+- a head labeled `PREV_TOKEN` can still have active `SINK` or `SEMANTIC` behaviors
+- dominant labels are useful for visualization, but active-set analyses are needed to interpret behavioral overlap
 
-In current comparison runs, this distinction is empirically important: many heads exceed thresholds for multiple behaviors simultaneously even when one dominant label accounts for the final trajectory summary.
+In current comparison runs, this distinction is empirically important: many heads
+have multiple active behaviors simultaneously even when one dominant label
+accounts for the trajectory summary.
 
 ---
 

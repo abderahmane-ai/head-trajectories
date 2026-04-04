@@ -50,6 +50,7 @@ def test_run_probing_pipeline_raises_on_checkpoint_failure_and_saves_partial(
         "block_size": torch.tensor(8, dtype=torch.long),
         "calibration_version": torch.tensor(CALIBRATION_VERSION, dtype=torch.long),
         "calibrated_thresholds_15m": torch.tensor([0.1, 0.1, 0.1, 0.1, 0.1], dtype=torch.float32),
+        "calibrated_thresholds_15m_null_scores_pooled": torch.zeros((16, 5), dtype=torch.float32),
     }
 
     monkeypatch.setattr("data.load_probe_dataset", lambda path: probe_dict)
@@ -119,6 +120,7 @@ def test_run_probing_pipeline_allows_heldout_without_natural_induction_keys(
         "block_size": torch.tensor(8, dtype=torch.long),
         "calibration_version": torch.tensor(CALIBRATION_VERSION, dtype=torch.long),
         "calibrated_thresholds_15m": torch.tensor([0.1, 0.1, 0.1, 0.1, 0.1], dtype=torch.float32),
+        "calibrated_thresholds_15m_null_scores_pooled": torch.zeros((16, 5), dtype=torch.float32),
     }
 
     monkeypatch.setattr("data.load_probe_dataset", lambda path: probe_dict)

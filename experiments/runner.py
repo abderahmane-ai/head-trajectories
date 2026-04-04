@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 
 from analysis import (
+    compute_activation_curves,
     compute_global_curves,
     compute_head_trajectories,
     compute_induction_count_curve,
@@ -32,7 +33,8 @@ from analysis import (
     find_crossing_steps,
     find_interesting_trajectories,
     load_run_results,
-    run_threshold_sensitivity,
+    run_fdr_sensitivity,
+    compute_null_subsample_stability,
 )
 from data import (
     OpenWebTextStream,
@@ -952,12 +954,22 @@ def analyze_single_run(
     paths = resolve_artifacts(profile_obj, seed, artifact_root)
     results = load_run_results(paths.results_path)
     global_curves = compute_global_curves([results])
+    activation_curves = compute_activation_curves([results])
     onset_steps = compute_specialization_onset(global_curves, threshold_frac=0.05)
+    activation_onset_steps = compute_specialization_onset(activation_curves, threshold_frac=0.05)
     onset_cis = compute_onset_bootstrap_cis(
         [results],
         threshold_frac=0.05,
         n_bootstraps=1000,
         random_seed=0,
+        curve_mode="dominance",
+    )
+    activation_onset_cis = compute_onset_bootstrap_cis(
+        [results],
+        threshold_frac=0.05,
+        n_bootstraps=1000,
+        random_seed=0,
+        curve_mode="activation",
     )
     learned_onset_steps = compute_specialization_onset(
         global_curves,
@@ -998,7 +1010,8 @@ def analyze_single_run(
             "second_deriv": None,
         }
     )
-    threshold_sensitivity = run_threshold_sensitivity([results], scale_factors=[0.8, 1.0, 1.2])
+    fdr_sensitivity = run_fdr_sensitivity([results], alphas=[0.01, 0.05, 0.10])
+    null_subsample_stability = compute_null_subsample_stability([results], alpha=0.05, threshold_frac=0.05)
 
     timeline_path = paths.figures_dir / f"timeline_seed{seed}.png"
     dominant_heatmap_path = paths.figures_dir / f"dominant_type_heatmap_seed{seed}.png"
@@ -1060,6 +1073,8 @@ def analyze_single_run(
         "steps": [int(x) for x in global_curves["steps"].tolist()],
         "onset_steps": onset_steps,
         "onset_cis": onset_cis,
+        "activation_onset_steps": activation_onset_steps,
+        "activation_onset_cis": activation_onset_cis,
         "learned_onset_steps": learned_onset_steps,
         "final_fractions": final_fractions,
         "mixed_behavior": {
@@ -1079,7 +1094,8 @@ def analyze_single_run(
             if results.get("natural_induction_score_tensor") is not None
             else None
         ),
-        "threshold_sensitivity": threshold_sensitivity["robustness_summary"],
+        "fdr_sensitivity": fdr_sensitivity["robustness_summary"],
+        "null_subsample_stability": null_subsample_stability["match_rates"],
         "sink_persistence": {
             "mean_persistence": float(sink_persistence["mean_persistence"]),
             "std_persistence": float(sink_persistence["std_persistence"]),
@@ -1136,13 +1152,23 @@ def analyze_profile_group(
         )
 
     global_curves = compute_global_curves(run_results)
+    activation_curves = compute_activation_curves(run_results)
     per_layer_curves = compute_per_layer_curves(run_results)
     onset_steps = compute_specialization_onset(global_curves, threshold_frac=0.05)
+    activation_onset_steps = compute_specialization_onset(activation_curves, threshold_frac=0.05)
     onset_cis = compute_onset_bootstrap_cis(
         run_results,
         threshold_frac=0.05,
         n_bootstraps=1000,
         random_seed=0,
+        curve_mode="dominance",
+    )
+    activation_onset_cis = compute_onset_bootstrap_cis(
+        run_results,
+        threshold_frac=0.05,
+        n_bootstraps=1000,
+        random_seed=0,
+        curve_mode="activation",
     )
     learned_onset_steps = compute_specialization_onset(
         global_curves,
@@ -1177,6 +1203,8 @@ def analyze_profile_group(
         "steps": [int(x) for x in global_curves["steps"].tolist()],
         "onset_steps": onset_steps,
         "onset_cis": onset_cis,
+        "activation_onset_steps": activation_onset_steps,
+        "activation_onset_cis": activation_onset_cis,
         "learned_onset_steps": learned_onset_steps,
         "final_fractions": final_fractions,
         "mixed_behavior": {
@@ -1301,6 +1329,9 @@ def run_full_single_experiment(
             "steps": [int(s) for s in results["step_index"]],
             "thresholds": results.get("effective_thresholds", results.get("thresholds")),
             "thresholds_sanitized": bool(results.get("thresholds_sanitized", False)),
+            "fdr_alpha": float(results.get("fdr_alpha", 0.05)),
+            "fdr_correction_scope": results.get("fdr_correction_scope", "per_head"),
+            "dominance_margin": float(results.get("dominance_margin", 0.5)),
         }
         print("[Stage] Probing complete.")
 

@@ -20,7 +20,7 @@ from matplotlib.colorbar import ColorbarBase
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from probing import HEAD_TYPES
+from probing import HEAD_TYPE_COLORS, HEAD_TYPES
 
 matplotlib.rcParams.update({
     "font.family":     "serif",
@@ -33,14 +33,7 @@ matplotlib.rcParams.update({
 })
 
 # Colors matching timeline_plot.py — indexed by label (0..5)
-TYPE_COLORS_HEX: List[str] = [
-    "#DDDDDD",   # UNDIFFERENTIATED
-    "#E24B4A",   # SINK
-    "#378ADD",   # PREV_TOKEN
-    "#EF9F27",   # INDUCTION
-    "#1D9E75",   # POSITIONAL
-    "#7F77DD",   # SEMANTIC
-]
+LEGACY_TYPE_COLORS_HEX: List[str] = [HEAD_TYPE_COLORS[name] for name in HEAD_TYPES]
 
 
 def _dominant_type_per_cell(
@@ -65,9 +58,9 @@ def _dominant_type_per_cell(
         for ckpt in range(n_ckpts):
             fracs = per_layer_mean[layer, ckpt]   # (6,)
 
-            # Mask out UNDIFF (index 0)
+    # Mask out non-specialized labels
             non_undiff_fracs        = fracs.copy()
-            non_undiff_fracs[0]     = -1.0
+            non_undiff_fracs[0:2]   = -1.0 if len(non_undiff_fracs) > 1 else -1.0
 
             best_type  = int(np.argmax(non_undiff_fracs))
             best_frac  = fracs[best_type]
@@ -103,8 +96,9 @@ def plot_dominant_type_heatmap(
     dominant = _dominant_type_per_cell(per_layer_mean)   # (n_layers, n_ckpts)
 
     # Build a custom colormap from our type colors
-    cmap   = mcolors.ListedColormap(TYPE_COLORS_HEX)
-    bounds = np.arange(-0.5, 6.5, 1.0)
+    type_colors_hex = [HEAD_TYPE_COLORS.get(name, "#333333") for name in type_names]
+    cmap   = mcolors.ListedColormap(type_colors_hex)
+    bounds = np.arange(-0.5, len(type_names) + 0.5, 1.0)
     norm   = mcolors.BoundaryNorm(bounds, cmap.N)
 
     fig, ax = plt.subplots(figsize=(10, 4))
@@ -149,7 +143,7 @@ def plot_dominant_type_heatmap(
     # Legend patches — one per type
     patches = [
         mpatches.Patch(
-            facecolor=TYPE_COLORS_HEX[t],
+            facecolor=type_colors_hex[t],
             label=type_names[t].replace("_", " ").title(),
             edgecolor="#888888",
             linewidth=0.5,
@@ -197,8 +191,9 @@ def plot_specialization_fraction_heatmap(
     per_layer_mean = per_layer_curves["per_layer_mean"]   # (n_layers, n_ckpts, 6)
     n_layers       = per_layer_curves["n_layers"]
 
-    # Specialization = 1 - UNDIFF fraction
-    spec_frac = 1.0 - per_layer_mean[:, :, 0]   # (n_layers, n_ckpts)
+    # Specialization = 1 - (WEAK + AMBIGUOUS) fraction for the new schema.
+    nonspecialized = per_layer_mean[:, :, :2].sum(axis=-1) if per_layer_mean.shape[-1] >= 2 else per_layer_mean[:, :, 0]
+    spec_frac = 1.0 - nonspecialized
 
     log_steps  = np.log10(np.maximum(steps, 1))
     step_edges = np.concatenate([

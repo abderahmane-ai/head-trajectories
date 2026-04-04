@@ -92,10 +92,11 @@ Results.pt → Compute Trajectories → Generate Figures → Hypothesis Tests
 - Returns scalar score in [0, 1] (except semantic: [-1, 1])
 
 ### 3. Classification
-- Threshold normalization: `scores / thresholds`
-- Argmax over normalized scores
-- Tie detection with tolerance (0.05)
-- UNDIFFERENTIATED fallback
+- Empirical one-sided p-values from pooled null scores
+- Per-head BH-FDR across the 5 metrics
+- Active behavior set as primary state
+- Dominant summary chosen from active behaviors by effect-size margin
+- Non-specialized states: `WEAK`, `AMBIGUOUS`
 
 ### 4. Checkpoint Schedule
 - Profile-specific, but always dense early relative to late
@@ -142,7 +143,7 @@ visualization/
 ### Adding a New Scoring Function
 1. Add function to `probing/scores.py`
 2. Update `score_head()` to call it
-3. Update `THRESHOLDS` in `probing/classifier.py`
+3. Update null-calibration and classifier inference plumbing (p-values/FDR inputs)
 4. Add corresponding tests in `tests/test_scores.py`
 
 ### Adding a New Head Type

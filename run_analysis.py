@@ -34,6 +34,7 @@ from typing import Dict, List, Optional
 from analysis import (
     load_run_results,
     compute_global_curves,
+    compute_activation_curves,
     compute_per_layer_curves,
     compute_head_trajectories,
     find_interesting_trajectories,
@@ -52,7 +53,8 @@ from analysis import (
     detect_val_loss_inflection,
     compute_discontinuity_score,
     print_phase_transition_report,
-    run_threshold_sensitivity,
+    run_fdr_sensitivity,
+    compute_null_subsample_stability,
     compute_inter_seed_agreement,
     print_controls_report,
 )
@@ -202,9 +204,14 @@ def main() -> None:
     print(f"{'─' * 64}")
 
     global_curves    = compute_global_curves(primary_results)
+    activation_curves = compute_activation_curves(primary_results)
     per_layer_curves = compute_per_layer_curves(primary_results)
     onset_steps = compute_specialization_onset(
         global_curves,
+        threshold_frac=0.05,
+    )
+    activation_onset_steps = compute_specialization_onset(
+        activation_curves,
         threshold_frac=0.05,
     )
     onset_cis = compute_onset_bootstrap_cis(
@@ -212,6 +219,14 @@ def main() -> None:
         threshold_frac=0.05,
         n_bootstraps=1000,
         random_seed=0,
+        curve_mode="dominance",
+    )
+    activation_onset_cis = compute_onset_bootstrap_cis(
+        primary_results,
+        threshold_frac=0.05,
+        n_bootstraps=1000,
+        random_seed=0,
+        curve_mode="activation",
     )
     learned_onset_steps = compute_specialization_onset(
         global_curves,
@@ -226,6 +241,9 @@ def main() -> None:
         onset_steps,
         learned_onset_steps=learned_onset_steps,
         onset_cis=onset_cis,
+        activation_curves=activation_curves,
+        activation_onset_steps=activation_onset_steps,
+        activation_onset_cis=activation_onset_cis,
         mixed_behavior=mixed_behavior,
         seed=primary_results[0]["seed"],
     )
@@ -372,42 +390,64 @@ def main() -> None:
     print(f"  [4/4] Scientific Controls")
     print(f"{'─' * 64}")
 
-    sensitivity   = run_threshold_sensitivity(
-        primary_results, scale_factors=[0.8, 1.0, 1.2]
+    sensitivity = run_fdr_sensitivity(primary_results, alphas=[0.01, 0.05, 0.10])
+    null_subsample = compute_null_subsample_stability(
+        primary_results,
+        alpha=0.05,
+        threshold_frac=0.05,
     )
     seed_agreement = compute_inter_seed_agreement(primary_results)
 
-    print_controls_report(sensitivity, seed_agreement)
+    print_controls_report(sensitivity, seed_agreement, null_subsample)
 
     # ─────────────────────────────────────────────────────────────────────────
     # HYPOTHESIS VERDICTS SUMMARY
     # ─────────────────────────────────────────────────────────────────────────
     sink_step_val = learned_onset_steps.get("SINK")
     prev_step_val = learned_onset_steps.get("PREV_TOKEN")
-    ind_step_val  = learned_onset_steps.get("INDUCTION")
-    sem_step_val  = learned_onset_steps.get("SEMANTIC")
+    ind_step_val = learned_onset_steps.get("INDUCTION")
+    sem_step_val = learned_onset_steps.get("SEMANTIC")
+    activation_sink = activation_onset_steps.get("SINK")
+    activation_prev = activation_onset_steps.get("PREV_TOKEN")
+    activation_ind = activation_onset_steps.get("INDUCTION")
+    activation_sem = activation_onset_steps.get("SEMANTIC")
 
-    h1 = (
+    dominance_h1 = (
         sink_step_val is not None and
         all(
             learned_onset_steps.get(t) is None or learned_onset_steps[t] >= sink_step_val
             for t in ["PREV_TOKEN", "INDUCTION", "SEMANTIC"]
         )
     )
-    h2 = (
+    dominance_h2 = (
         sink_step_val is not None and
         prev_step_val is not None and
-        ind_step_val  is not None and
-        sem_step_val  is not None and
+        ind_step_val is not None and
+        sem_step_val is not None and
         sink_step_val <= prev_step_val < ind_step_val < sem_step_val
+    )
+    activation_h1 = (
+        activation_sink is not None and
+        all(
+            activation_onset_steps.get(t) is None or activation_onset_steps[t] >= activation_sink
+            for t in ["PREV_TOKEN", "INDUCTION", "SEMANTIC"]
+        )
+    )
+    activation_h2 = (
+        activation_sink is not None and
+        activation_prev is not None and
+        activation_ind is not None and
+        activation_sem is not None and
+        activation_sink <= activation_prev < activation_ind < activation_sem
     )
 
     # H3: lower layers specialize first — use mean onset step per layer
-    per_layer_mean = per_layer_curves["per_layer_mean"]   # (n_layers, n_ckpts, 6)
+    per_layer_mean = per_layer_curves["per_layer_mean"]
     layer_steps    = per_layer_curves["steps"]
     layer_onsets   = []
     for layer in range(per_layer_curves["n_layers"]):
-        spec = 1.0 - per_layer_mean[layer, :, 0]
+        nonspecialized = per_layer_mean[layer, :, :2].sum(axis=-1)
+        spec = 1.0 - nonspecialized
         above = (spec >= 0.5).nonzero()
         if hasattr(above, '__len__') and len(above) > 0:
             first = int(above[0]) if not hasattr(above[0], '__len__') else int(above[0][0])
@@ -431,8 +471,10 @@ def main() -> None:
     print(f"\n{'=' * 64}")
     print(f"  HYPOTHESIS VERDICTS")
     print(f"{'=' * 64}")
-    print(_verdict(h1, "H1 — Sink-First Among Learned Types"))
-    print(_verdict(h2, "H2 — Learned Ordered Development (S→Prev→I→Sem)"))
+    print(_verdict(activation_h1, "H1a — Sink-First Activation"))
+    print(_verdict(dominance_h1, "H1b — Sink-First Dominance"))
+    print(_verdict(activation_h2, "H2a — Ordered Activation"))
+    print(_verdict(dominance_h2, "H2b — Ordered Dominance"))
     print(_verdict(h3, "H3 — Layer Stratification"))
     print(_verdict(h4, "H4 — Induction Phase Transition"))
     print(_verdict(h5, "H5 — Sink Persistence"))

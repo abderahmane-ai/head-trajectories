@@ -22,7 +22,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from .extractor import extract_checkpoint, CheckpointExtraction
 from .scores import natural_induction_score, score_head
-from .classifier import HeadClassifier, HEAD_TYPES, THRESHOLDS
+from .classifier import (
+    DEFAULT_DOMINANCE_MARGIN,
+    DEFAULT_FDR_ALPHA,
+    HeadClassifier,
+    HEAD_TYPES,
+    THRESHOLDS,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -291,6 +297,7 @@ def run_probing_pipeline(
         else "calibrated_thresholds_15m"
     )
     thresholds = probe_dict.get(thresholds_key)
+    pooled_null_scores = probe_dict.get(f"{thresholds_key}_null_scores_pooled")
     if thresholds is None:
         print(
             f"  [WARNING] No calibrated thresholds found under "
@@ -299,6 +306,11 @@ def run_probing_pipeline(
         thresholds = THRESHOLDS
     else:
         print(f"  Using calibrated thresholds: {thresholds_key}")
+    if pooled_null_scores is None:
+        raise RuntimeError(
+            f"Probe dataset is missing pooled null scores for {thresholds_key}. "
+            "Rebuild the probe dataset under the current calibration schema."
+        )
     del first_model
 
     # ── Check for partial results and resume if requested ────────────────────
@@ -321,6 +333,9 @@ def run_probing_pipeline(
         seed=seed,
         ties_log_path=ties_log_path,
         thresholds=thresholds,
+        pooled_null_scores=pooled_null_scores,
+        fdr_alpha=DEFAULT_FDR_ALPHA,
+        dominance_margin=DEFAULT_DOMINANCE_MARGIN,
     )
     
     # Restore partial results if resuming
@@ -330,10 +345,16 @@ def run_probing_pipeline(
         if "threshold_flag_tensor" in partial:
             classifier.threshold_flag_tensor = partial["threshold_flag_tensor"]
             classifier.normalized_score_tensor = partial["normalized_score_tensor"]
+            if "active_behavior_tensor" in partial:
+                classifier.active_behavior_tensor = partial["active_behavior_tensor"]
+                classifier.p_value_tensor = partial["p_value_tensor"]
+                classifier.effect_size_tensor = partial["effect_size_tensor"]
             classifier.primary_behavior_tensor = partial["primary_behavior_tensor"]
             classifier.runner_up_tensor = partial["runner_up_tensor"]
             classifier.dominant_margin_tensor = partial["dominant_margin_tensor"]
             classifier.behavior_count_tensor = partial["behavior_count_tensor"]
+        if "dominant_label_tensor" in partial:
+            classifier.dominant_label_tensor = partial["dominant_label_tensor"]
         classifier.natural_induction_score_tensor = partial.get(
             "natural_induction_score_tensor"
         )
@@ -400,7 +421,7 @@ def run_probing_pipeline(
             HEAD_TYPES[t]: int((labels_this_ckpt == t).sum())
             for t in range(len(HEAD_TYPES))
         }
-        dominant = max(type_counts, key=lambda k: type_counts[k] if k != "UNDIFFERENTIATED" else -1)
+        dominant = max(type_counts, key=type_counts.get)
 
         print(
             f"  {ckpt_idx + 1:>5}  {step:>8,}  "

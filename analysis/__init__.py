@@ -3,6 +3,7 @@
 from .trajectories import (
     load_run_results,
     compute_global_curves,
+    compute_activation_curves,
     compute_per_layer_curves,
     compute_head_trajectories,
     find_interesting_trajectories,
@@ -27,9 +28,9 @@ from .phase_transition import (
     print_phase_transition_report,
 )
 from .controls import (
-    run_threshold_sensitivity,
+    run_fdr_sensitivity,
+    compute_null_subsample_stability,
     compute_inter_seed_agreement,
-    reclassify_with_scaled_thresholds,
     extract_ordering_conclusions,
     print_controls_report,
 )
@@ -37,6 +38,7 @@ from .controls import (
 __all__ = [
     "load_run_results",
     "compute_global_curves",
+    "compute_activation_curves",
     "compute_per_layer_curves",
     "compute_head_trajectories",
     "find_interesting_trajectories",
@@ -55,9 +57,9 @@ __all__ = [
     "detect_val_loss_inflection",
     "compute_discontinuity_score",
     "print_phase_transition_report",
-    "run_threshold_sensitivity",
+    "run_fdr_sensitivity",
+    "compute_null_subsample_stability",
     "compute_inter_seed_agreement",
-    "reclassify_with_scaled_thresholds",
     "extract_ordering_conclusions",
     "print_controls_report",
 ]

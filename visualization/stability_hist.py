@@ -19,7 +19,7 @@ import matplotlib.ticker as ticker
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from probing import HEAD_TYPES
+from probing import HEAD_TYPE_COLORS, HEAD_TYPES
 
 matplotlib.rcParams.update({
     "font.family":     "serif",
@@ -33,14 +33,7 @@ matplotlib.rcParams.update({
     "axes.spines.right": False,
 })
 
-TYPE_COLORS_HEX: List[str] = [
-    "#DDDDDD",   # UNDIFFERENTIATED
-    "#E24B4A",   # SINK
-    "#378ADD",   # PREV_TOKEN
-    "#EF9F27",   # INDUCTION
-    "#1D9E75",   # POSITIONAL
-    "#7F77DD",   # SEMANTIC
-]
+TYPE_COLORS_HEX: List[str] = [HEAD_TYPE_COLORS[name] for name in HEAD_TYPES]
 
 
 def plot_stability_figure(
@@ -99,7 +92,8 @@ def plot_stability_figure(
     )
 
     # ── Panel B: Per-type mean changes + sink persistence ────────────────────
-    non_undiff_types = [t for t in HEAD_TYPES if t != "UNDIFFERENTIATED"]
+    # `UNDIFFERENTIATED` is a deprecated legacy label; exclude non-specialized states.
+    non_undiff_types = [t for t in HEAD_TYPES if t not in {"WEAK", "AMBIGUOUS", "UNDIFFERENTIATED"}]
     type_indices     = [HEAD_TYPES.index(t) for t in non_undiff_types]
 
     means  = [per_type_stab[t]["mean_changes"] for t in non_undiff_types]

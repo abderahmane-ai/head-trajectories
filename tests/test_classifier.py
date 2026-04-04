@@ -13,6 +13,8 @@ from probing.classifier import (
     prepare_thresholds,
     HEAD_TYPES,
     THRESHOLDS,
+    LABEL_AMBIGUOUS,
+    LABEL_WEAK,
     LABEL_UNDIFF,
     LABEL_SINK,
     LABEL_PREV,
@@ -26,7 +28,7 @@ class TestClassifyHead:
     """Test the classify_head function."""
     
     def test_all_below_threshold(self):
-        """Scores all below threshold should return UNDIFFERENTIATED."""
+        """Scores all below threshold should return WEAK."""
         scores = (0.1, 0.2, 0.1, 0.3, 0.1)  # All below THRESHOLDS
         label, is_tie = classify_head(scores)
         assert label == LABEL_UNDIFF, f"Should be UNDIFF, got {label}"
@@ -52,14 +54,14 @@ class TestClassifyHead:
         scores = (0.42, 0.52, 0.1, 0.3, 0.1)
         # After dividing by thresholds: 0.42/0.4=1.05, 0.52/0.5=1.04
         label, is_tie = classify_head(scores, tie_tolerance=0.05)
-        assert label == LABEL_UNDIFF, "Tie should result in UNDIFF"
+        assert label == LABEL_AMBIGUOUS, "Tie should result in AMBIGUOUS"
         assert is_tie, "Should detect tie"
 
     def test_classification_metadata(self):
         """Detailed classification should expose mixed-behavior metadata."""
         scores = (0.42, 0.52, 0.1, 0.3, 0.1)
         result = classify_head_details(scores, tie_tolerance=0.05)
-        assert result.label == LABEL_UNDIFF
+        assert result.label == LABEL_AMBIGUOUS
         assert result.is_tie
         assert result.threshold_flags.shape == (5,)
         assert result.normalized_scores.shape == (5,)
@@ -213,7 +215,7 @@ class TestHeadClassifier:
             scores=scores,
         )
         
-        assert label == LABEL_UNDIFF
+        assert label == LABEL_AMBIGUOUS
         assert len(classifier._ties) == 1
         
         # Flush and check file
@@ -335,25 +337,27 @@ class TestHeadTypes:
     
     def test_head_types_length(self):
         """Test that HEAD_TYPES has 6 entries."""
-        assert len(HEAD_TYPES) == 6
+        assert len(HEAD_TYPES) == 7
     
     def test_head_types_order(self):
         """Test that HEAD_TYPES is in the correct order."""
-        assert HEAD_TYPES[0] == "UNDIFFERENTIATED"
-        assert HEAD_TYPES[1] == "SINK"
-        assert HEAD_TYPES[2] == "PREV_TOKEN"
-        assert HEAD_TYPES[3] == "INDUCTION"
-        assert HEAD_TYPES[4] == "POSITIONAL"
-        assert HEAD_TYPES[5] == "SEMANTIC"
+        assert HEAD_TYPES[0] == "WEAK"
+        assert HEAD_TYPES[1] == "AMBIGUOUS"
+        assert HEAD_TYPES[2] == "SINK"
+        assert HEAD_TYPES[3] == "PREV_TOKEN"
+        assert HEAD_TYPES[4] == "INDUCTION"
+        assert HEAD_TYPES[5] == "POSITIONAL"
+        assert HEAD_TYPES[6] == "SEMANTIC"
     
     def test_label_constants(self):
         """Test that label constants match indices."""
-        assert LABEL_UNDIFF == 0
-        assert LABEL_SINK == 1
-        assert LABEL_PREV == 2
-        assert LABEL_IND == 3
-        assert LABEL_POS == 4
-        assert LABEL_SEM == 5
+        assert LABEL_WEAK == 0
+        assert LABEL_AMBIGUOUS == 1
+        assert LABEL_SINK == 2
+        assert LABEL_PREV == 3
+        assert LABEL_IND == 4
+        assert LABEL_POS == 5
+        assert LABEL_SEM == 6
 
 
 class TestThresholds:

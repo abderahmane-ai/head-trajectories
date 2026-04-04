@@ -41,13 +41,13 @@ Yes, but you'll need a GPU for training. The probing pipeline runs fine on CPU.
 - Version-controlled thresholds
 
 ### What about statistical significance?
-The intended main-study setup uses multiple seeds and reports inter-seed agreement. Controls include threshold sensitivity checks and per-seed consistency checks, but single-seed pilot or comparison runs should be treated as exploratory rather than conclusive.
+The active methodology is now statistically grounded at the classifier layer: each head/metric score is compared to the pooled empirical null, one-sided empirical p-values are computed, and per-head BH-FDR is applied across the five behaviors. Robustness controls now focus on FDR-alpha sensitivity, null-subsample stability, and inter-seed agreement. Single-seed pilot or comparison runs should still be treated as exploratory rather than conclusive.
 
 ### Why not more seeds?
 Cost-benefit tradeoff. Multi-seed runs are the right standard for stronger claims, but notebook-scale exploratory runs are often done first to validate methodology, inspect score geometry, and compare datasets cheaply.
 
 ### How were thresholds chosen?
-Calibrated from a random baseline: initialize random models (15M and 6M), causally scramble key positions within each valid attention row to destroy structured behavior while preserving causal row-stochastic attention, compute all 5 scores, and then apply metric-specific null thresholds. `SINK`, `PREV_TOKEN`, `INDUCTION`, and `POSITIONAL` use `mean + 2*std`; `SEMANTIC` uses the null `p99` because the per-head semantic null becomes too tightly concentrated after averaging. Calibration runs 3 seeds, stores per-seed diagnostics and quantiles, and flags any non-positive thresholds that would require defensive sanitization at classification time. See `data/calibration.py`.
+Calibration still comes from a random baseline: initialize random models (15M and 6M), causally scramble key positions within each valid attention row to destroy structured behavior while preserving causal row-stochastic attention, compute all 5 scores, and store the resulting empirical null. The repository still stores `mean + 2*std` / `p99` threshold summaries for diagnostics and legacy inspection, but the main classifier now uses the **full pooled null distribution** rather than a single scalar threshold per metric. See `data/calibration.py`.
 
 ### What about other head types?
 The five types we study are the most well-documented. The framework is extensible - you can add new scoring functions.
@@ -63,7 +63,7 @@ Yes. See `ModelConfig.small_15m()` and `ModelConfig.ablation_6m()` for examples.
 ### How do I add a new scoring function?
 1. Add function to `probing/scores.py`
 2. Update `score_head()` to call it
-3. Add threshold to `probing/classifier.py`
+3. Update the classifier and null-calibration logic to include the new metric in the pooled empirical-null inference
 4. Add tests to `tests/test_scores.py`
 
 ### Can I visualize individual head trajectories?
@@ -81,7 +81,8 @@ The canonical hypothesis wording is:
 Important interpretation notes:
 
 - dominant labels are summaries, not full identities
-- the raw score tensor is preserved, so a head can express multiple behaviors above threshold even if one label wins
+- the active behavior set is the primary scientific object
+- the raw score tensor is preserved, so a head can express multiple statistically active behaviors even if one dominant summary label wins
 - onset steps are operational statistics, not immutable truths; they can be sensitive in noisy or single-seed runs
 - current single-seed comparison runs do not strongly support `H1` or `H2`
 
@@ -91,7 +92,7 @@ See [METHODOLOGY.md](./METHODOLOGY.md) for the exact operational definitions.
 Current evidence does not suggest that the induction probes are broken. Probe-integrity checks pass, and the induction metric can fire in real runs. The more likely interpretation is that induction is weak, late, or dataset-sensitive under the current small-model / 12k-step comparison settings.
 
 ### Are labels the whole story?
-No. The classifier assigns a dominant label for visualization and trajectory summaries, but many heads exceed thresholds for multiple behaviors at once. This is why the repository stores the full raw score tensor in results files and why raw-score analyses can reveal mixed-behavior heads that the label view compresses.
+No. The classifier now detects an **active behavior set** via empirical p-values and BH-FDR, then assigns a dominant summary label only if one surviving behavior clearly wins. This is why the repository stores active-set tensors, p-values, effect sizes, runner-up behavior, and margins in addition to the dominant label tensor.
 
 ## Troubleshooting
 

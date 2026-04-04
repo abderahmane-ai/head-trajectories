@@ -1,6 +1,6 @@
 # Experiment Log
 
-This file is a historical log of early pilot runs. For current-calibration archived findings and their run reports, see the local `run_exports/` archive rather than treating the notes below as the current state of evidence.
+This file is a historical log of early pilot runs. For current archived findings and their run reports, see the local `run_exports/` archive rather than treating the notes below as the current state of evidence.
 
 ## Current Baseline Conclusions
 
@@ -20,17 +20,18 @@ In other words, the dominant behavioral composition is not fixed by architecture
 
 The other important current conclusion is:
 
-- many heads exhibit multiple behaviors above threshold simultaneously
+- many heads exhibit multiple statistically active behaviors simultaneously
 - dominant labels are still useful, but they compress substantial overlap
 
-This means the next intended methodology improvement is **classification/reporting**, not a rewrite of the score definitions.
+This methodology change has now landed: the repository uses an **FDR-based multi-behavior classifier** built on the existing five scores and empirical null calibration.
 
-Specifically, the next classification layer should keep the current five scores and thresholding scheme, but should expose:
+Current classification/reporting now exposes:
 
 - `WEAK` versus `AMBIGUOUS` non-specialized states
+- active behavior set
 - dominant behavior plus runner-up behavior
 - dominant margin
-- number of behaviors above threshold
+- number of statistically active behaviors
 
 ### Current hypothesis status
 
@@ -84,6 +85,10 @@ When did each head type cross the 5% threshold (at least 3 heads exhibiting the 
 *   **PREV_TOKEN:** 400
 *   **SINK:** 800
 *   **UNDIFFERENTIATED, INDUCTION, SEMANTIC:** None (Below 5% threshold)
+
+Note: this pilot section uses the old label vocabulary from that period. In the
+current default methodology, `UNDIFFERENTIATED` has been replaced by
+`WEAK` and `AMBIGUOUS`.
 
 ### Key Insights
 

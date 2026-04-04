@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import torch
 
-from probing.classifier import classify_head, LABEL_UNDIFF
+from probing.classifier import classify_head, LABEL_AMBIGUOUS, LABEL_SINK, LABEL_WEAK
 
 
 def test_tie_tolerance_clear_winner():
@@ -24,7 +24,7 @@ def test_tie_tolerance_clear_winner():
     # Should classify as SINK regardless of tolerance
     for tolerance in [0.01, 0.05, 0.10, 0.20]:
         label, is_tie = classify_head(scores, thresholds, tie_tolerance=tolerance)
-        assert label == 1, f"Expected SINK (1), got {label} with tolerance={tolerance}"
+        assert label == LABEL_SINK, f"Expected SINK ({LABEL_SINK}), got {label} with tolerance={tolerance}"
         assert not is_tie
 
 
@@ -37,12 +37,12 @@ def test_tie_tolerance_genuine_tie():
     
     # Should be UNDIFFERENTIATED with tolerance >= 0.05
     label, is_tie = classify_head(scores, thresholds, tie_tolerance=0.05)
-    assert label == LABEL_UNDIFF, f"Expected UNDIFF, got {label}"
+    assert label == LABEL_AMBIGUOUS, f"Expected AMBIGUOUS, got {label}"
     assert is_tie, "Expected is_tie=True"
     
     # Should classify as SINK with tolerance < 0.05
     label, is_tie = classify_head(scores, thresholds, tie_tolerance=0.04)
-    assert label == 1, f"Expected SINK (1), got {label}"
+    assert label == LABEL_SINK, f"Expected SINK ({LABEL_SINK}), got {label}"
     assert not is_tie
 
 
@@ -55,12 +55,12 @@ def test_tie_tolerance_near_tie():
     
     # Should classify as SINK with tolerance = 0.05 (gap > tolerance)
     label, is_tie = classify_head(scores, thresholds, tie_tolerance=0.05)
-    assert label == 1, f"Expected SINK (1), got {label}"
+    assert label == LABEL_SINK, f"Expected SINK ({LABEL_SINK}), got {label}"
     assert not is_tie
     
     # Should be UNDIFFERENTIATED with tolerance = 0.15 (gap < tolerance)
     label, is_tie = classify_head(scores, thresholds, tie_tolerance=0.15)
-    assert label == LABEL_UNDIFF, f"Expected UNDIFF, got {label}"
+    assert label == LABEL_AMBIGUOUS, f"Expected AMBIGUOUS, got {label}"
     assert is_tie
 
 
@@ -108,10 +108,10 @@ def test_tie_tolerance_distribution_analysis():
             
             label, is_tie = classify_head(tuple(raw_scores), thresholds, tie_tolerance=tolerance)
             
-            if label == LABEL_UNDIFF:
+            if label == LABEL_WEAK:
                 n_undiff += 1
-                if is_tie:
-                    n_ties += 1
+            if label == LABEL_AMBIGUOUS:
+                n_ties += 1
         
         results_by_tolerance[tolerance] = {
             'n_undiff': n_undiff,
@@ -156,19 +156,19 @@ def test_tie_tolerance_edge_cases():
     # Edge case 1: All scores below threshold
     scores = (0.1, 0.1, 0.1, 0.1, 0.1)
     label, is_tie = classify_head(scores, thresholds, tie_tolerance=0.05)
-    assert label == LABEL_UNDIFF
+    assert label == LABEL_WEAK
     assert not is_tie, "Should not be marked as tie if all below threshold"
     
     # Edge case 2: Exact tie (gap = 0.0)
     scores = (0.8, 1.0, 0.1, 0.2, 0.1)  # z_sink=2.0, z_prev=2.0
     label, is_tie = classify_head(scores, thresholds, tie_tolerance=0.05)
-    assert label == LABEL_UNDIFF
+    assert label == LABEL_AMBIGUOUS
     assert is_tie
     
     # Edge case 3: Gap exactly at tolerance boundary
     scores = (0.8, 0.975, 0.1, 0.2, 0.1)  # gap = 0.05 exactly
     label, is_tie = classify_head(scores, thresholds, tie_tolerance=0.05)
-    assert label == LABEL_UNDIFF, "Gap exactly at boundary should be treated as tie"
+    assert label == LABEL_AMBIGUOUS, "Gap exactly at boundary should be treated as tie"
     assert is_tie
 
 

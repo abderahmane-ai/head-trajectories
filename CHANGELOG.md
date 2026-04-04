@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Modal cloud training integration
 - Comprehensive probing pipeline
 - Trajectory analysis and visualization
-- Scientific controls (threshold sensitivity, inter-seed agreement)
+- Scientific controls (legacy threshold sensitivity, inter-seed agreement)
 - Phase transition analysis for induction heads
 - Publication-quality figures (300 DPI)
 - Complete unit test suite (60 tests)
@@ -37,6 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **BREAKING**: Default classifier replaced with FDR-based multi-behavior inference
+  - Computes empirical p-values from pooled null calibration scores
+  - Applies per-head BH-FDR across the 5 behavior metrics
+  - Stores active behavior sets as the primary state representation
+  - Uses effect-size margin to decide dominant summary vs `AMBIGUOUS`
+- **BREAKING**: Label ontology migrated from 6-class heuristic schema to 7-class summary schema
+  - `UNDIFFERENTIATED` replaced by `WEAK` and `AMBIGUOUS`
+  - Dominant labels remain for reporting, but active sets drive inference
+- Calibration summaries remain (`mean+2std`, `p99`) as diagnostics/reference only
+- Scientific controls now use FDR-alpha sensitivity and null-subsample stability
+
 - **BREAKING**: SINK metric now measures fixed-position anchoring instead of sharpness
   - Uses causal-mask normalization: divides by number of reachable queries per key position
   - Separates true sink heads (score ~1.0) from prev-token heads (score ~0.5)

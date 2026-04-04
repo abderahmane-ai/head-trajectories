@@ -1,7 +1,7 @@
 """
 visualization/timeline_plot.py — Main developmental timeline figure.
 
-Produces the paper's lead figure: six curves showing the fraction of all
+Produces the paper's lead figure: dominance curves showing the fraction of all
 attention heads classified as each type vs. training step, averaged across
 seeds with ±1 std confidence bands.
 
@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from probing import HEAD_TYPE_COLORS
 
 matplotlib.rcParams.update({
     "font.family":        "serif",
@@ -33,32 +35,9 @@ matplotlib.rcParams.update({
 })
 
 # Color palette — one per head type (index-aligned with HEAD_TYPES)
-TYPE_COLORS: List[str] = [
-    "#AAAAAA",   # UNDIFFERENTIATED
-    "#E24B4A",   # SINK
-    "#378ADD",   # PREV_TOKEN
-    "#EF9F27",   # INDUCTION
-    "#1D9E75",   # POSITIONAL
-    "#7F77DD",   # SEMANTIC
-]
-
-TYPE_LINESTYLES: List[str] = [
-    "--",    # UNDIFFERENTIATED — dashed to de-emphasize
-    "-",     # SINK
-    "-",     # PREV_TOKEN
-    "-",     # INDUCTION
-    "-",     # POSITIONAL
-    "-",     # SEMANTIC
-]
-
-TYPE_LINEWIDTHS: List[float] = [
-    1.2,    # UNDIFFERENTIATED
-    2.0,    # SINK
-    2.0,    # PREV_TOKEN
-    2.2,    # INDUCTION — slightly thicker (most important)
-    2.0,    # POSITIONAL
-    2.0,    # SEMANTIC
-]
+# `UNDIFFERENTIATED` is kept only for legacy-result compatibility and is deprecated.
+DEEMPHASIZED_TYPES = {"WEAK", "AMBIGUOUS", "UNDIFFERENTIATED"}
+TYPE_COLORS: List[str] = [HEAD_TYPE_COLORS.get(name, "#333333") for name in HEAD_TYPE_COLORS]
 
 
 def plot_timeline(
@@ -74,12 +53,12 @@ def plot_timeline(
 
     Args:
         global_curves:  output of compute_global_curves — contains steps,
-                        mean (n_ckpts, 6), std (n_ckpts, 6), type_names
+                        mean (n_ckpts, n_types), std (n_ckpts, n_types), type_names
         output_path:    path to save the PNG figure
         onset_steps:    optional dict mapping type_name → onset step;
                         if provided, vertical dashed markers are drawn
         log_x:          if True, use log scale on x-axis (recommended)
-        show_undiff:    if True, include the UNDIFFERENTIATED curve
+        show_undiff:    if True, include non-specialized curves (`WEAK`, `AMBIGUOUS`, legacy `UNDIFFERENTIATED`)
         title:          figure title string
     """
 
@@ -92,14 +71,14 @@ def plot_timeline(
     fig, ax = plt.subplots(figsize=(8, 5))
 
     for t_idx, type_name in enumerate(type_names):
-        if not show_undiff and type_name == "UNDIFFERENTIATED":
+        if not show_undiff and type_name in DEEMPHASIZED_TYPES:
             continue
 
         y      = mean[:, t_idx]
         y_std  = std[:, t_idx]
-        color  = TYPE_COLORS[t_idx]
-        ls     = TYPE_LINESTYLES[t_idx]
-        lw     = TYPE_LINEWIDTHS[t_idx]
+        color  = HEAD_TYPE_COLORS.get(type_name, "#333333")
+        ls     = "--" if type_name in DEEMPHASIZED_TYPES else "-"
+        lw     = 1.2 if type_name in DEEMPHASIZED_TYPES else (2.2 if type_name == "INDUCTION" else 2.0)
         label  = type_name.replace("_", " ").title()
 
         ax.plot(steps, y, color=color, lw=lw, ls=ls, label=label, zorder=3)
@@ -118,12 +97,12 @@ def plot_timeline(
     # Onset markers — vertical lines at first emergence of each type
     if onset_steps is not None:
         for type_name, step in onset_steps.items():
-            if step is None or type_name == "UNDIFFERENTIATED":
+            if step is None or type_name in DEEMPHASIZED_TYPES:
                 continue
             t_idx = type_names.index(type_name) if type_name in type_names else -1
             if t_idx < 0:
                 continue
-            color = TYPE_COLORS[t_idx]
+            color = HEAD_TYPE_COLORS.get(type_name, "#333333")
             ax.axvline(
                 x=step, color=color, lw=0.8, ls=":", alpha=0.6, zorder=1
             )
@@ -202,10 +181,10 @@ def plot_timeline_per_seed(
 
     for s_idx, ax in enumerate(axes):
         for t_idx, type_name in enumerate(type_names):
-            if type_name == "UNDIFFERENTIATED":
+            if type_name in DEEMPHASIZED_TYPES:
                 continue
             y     = per_seed[s_idx, :, t_idx]
-            color = TYPE_COLORS[t_idx]
+            color = HEAD_TYPE_COLORS.get(type_name, "#333333")
             label = type_name.replace("_", " ").title()
             ax.plot(steps, y, color=color, lw=1.8, label=label)
 
