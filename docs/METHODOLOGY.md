@@ -423,17 +423,17 @@ Interpretation:
 
 ---
 
-## 6. Threshold Calibration
+## 6. Null Calibration (with Diagnostic Threshold Summaries)
 
 Raw scores across the five metrics are **not directly comparable**. A score of $0.10$ may be highly meaningful for one metric and unremarkable for another.
 
-The project therefore calibrates a threshold vector
+The project therefore calibrates an **empirical null distribution** for each metric (pooled across calibration seeds), and also derives a compact diagnostic threshold vector
 
 $$
 \tau = (\tau_{\text{sink}}, \tau_{\text{prev}}, \tau_{\text{ind}}, \tau_{\text{pos}}, \tau_{\text{sem}})
 $$
 
-from a random baseline.
+from that null.
 
 ### 6.1 Why calibration is needed
 
@@ -488,6 +488,14 @@ where \(Q_{0.99}(r_{\cdot,m})\) is the empirical 99th percentile of the semantic
 
 The semantic exception is intentional. The semantic metric is a signed Pearson-correlation statistic, and its null variance collapses sharply once per-position correlations are averaged into a final per-head score. In practice, using \(\mu_m + 2\sigma_m\) for semantic produced thresholds that were too permissive. A high null quantile is therefore used for semantic while the other four metrics retain the original mean-plus-two-standard-deviations rule.
 
+Important: these scalar thresholds are **not** the primary classification gate under the current default methodology. They are retained as:
+
+- compact diagnostics for calibration sanity checks and reporting
+- legacy-compatibility metadata for loading older result bundles
+- optional per-head reference features (e.g., `threshold_flags` / normalized scores) that help interpret overlap, but do not define statistical significance
+
+The primary decision layer uses pooled null samples to compute empirical p-values and applies BH-FDR (Section 7).
+
 ### 6.3 Multi-seed calibration
 
 The repository repeats this calibration across several random seeds and stores:
@@ -503,7 +511,7 @@ The repository repeats this calibration across several random seeds and stores:
 - their empirical mean
 - their empirical standard deviation
 
-The final threshold vector used in the main pipeline is the mean threshold across calibration seeds.
+The pipeline stores the mean threshold across calibration seeds as a diagnostic summary, but the **default classifier** uses the pooled empirical null (p-values + BH-FDR) rather than threshold gating.
 
 ---
 
