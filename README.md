@@ -31,7 +31,7 @@ Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 **Probing:** Fixed held-out dataset with probe families:
 - General sequences (real text)
 - Induction sequences (engineered repeated patterns)
-- Natural induction sequences (real repeated subsequences, optional auxiliary comparison and currently disabled by default)
+- Natural induction sequences (real repeated subsequences, auxiliary validation when available; still off by default in the lightweight profiles)
 - Positional pairs (same length, different content)
 
 **Scoring:** Five behavioral metrics per head:
@@ -39,9 +39,9 @@ Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 - **PREV_TOKEN**: Attention to t-1
 - **INDUCTION**: Pattern completion via repeated subsequences
 - **POSITIONAL**: Content-invariant attention (KL divergence)
-- **SEMANTIC**: Alignment with embedding similarity (masked)
+- **SEMANTIC**: Internal semantic alignment in the model's current embedding space (masked; validity tracked explicitly)
 
-**Classification:** Thresholds are still calibrated from a causally scrambled random baseline, but they are now diagnostic/reference quantities rather than the main decision rule. The classifier uses the **pooled empirical null**, computes one-sided empirical p-values per metric, applies **per-head BH-FDR** across the five behaviors, treats the surviving metrics as the head’s **active behavior set**, and then assigns a dominant summary label only if one surviving behavior clears a fixed effect-size margin. Non-specialized states are now split into `WEAK` (no behaviors survive) and `AMBIGUOUS` (multiple survive without a clear winner).
+**Classification:** Thresholds are still calibrated from a causally scrambled random baseline, but they are now diagnostic/reference quantities rather than the main decision rule. The classifier uses the **pooled empirical null**, computes one-sided empirical p-values per metric, applies **per-head BH-FDR** across the five behaviors, treats the surviving metrics as the head’s **active behavior set**, and then assigns a dominant summary label only if one surviving behavior clears a fixed effect-size margin. Non-specialized states are now split into `WEAK` (no behaviors survive) and `AMBIGUOUS` (multiple survive without a clear winner). Undefined semantic measurements are tracked explicitly and treated as inactive rather than silently counted as semantic evidence.
 
 See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 

@@ -11,6 +11,7 @@ from probing.scores import (
     induction_score,
     positional_score,
     semantic_score,
+    semantic_score_detailed,
     score_head,
 )
 
@@ -297,6 +298,20 @@ class TestSemanticScore:
         
         score = semantic_score(attn, token_ids, embedding_matrix)
         assert np.isfinite(score), f"Should handle degenerate case, got {score}"
+
+    def test_detailed_semantic_marks_undefined_cases(self):
+        """Detailed semantic scoring should preserve undefinedness."""
+        N, T, V, D = 10, 8, 100, 64
+        token_ids = torch.zeros(N, T, dtype=torch.long)
+        embedding_matrix = torch.randn(V, D)
+        attn = torch.softmax(torch.randn(N, T, T), dim=-1)
+
+        details = semantic_score_detailed(attn, token_ids, embedding_matrix)
+
+        assert details["is_defined"] is False
+        assert np.isnan(details["score"])
+        assert details["n_used_positions"] == 0
+        assert details["valid_fraction"] == pytest.approx(0.0)
     
     def test_exclusion_mask_active(self):
         """

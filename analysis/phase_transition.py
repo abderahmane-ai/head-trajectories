@@ -17,7 +17,7 @@ Computes:
 import numpy as np
 import torch
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from probing import LABEL_IND
 from model import ModelConfig
@@ -77,7 +77,7 @@ def compute_induction_count_curve(
 
 def extract_val_loss_curve(
     run_results: List[Dict],
-    ckpt_dir:    Path,
+    ckpt_dir:    Path | Sequence[Path],
 ) -> Dict[str, np.ndarray]:
     """
     Extract validation loss at each checkpoint step from saved checkpoint files.
@@ -98,35 +98,40 @@ def extract_val_loss_curve(
     min_ckpts = min(len(r["step_index"]) for r in run_results)
     steps     = np.array(run_results[0]["step_index"][:min_ckpts])
 
-    # Try to load val_loss from checkpoint files directly
-    val_losses = np.full((min_ckpts,), np.nan, dtype=np.float32)
+    ckpt_dirs = [ckpt_dir] if isinstance(ckpt_dir, Path) else list(ckpt_dir)
+    per_dir_losses: List[np.ndarray] = []
 
-    ckpt_files = sorted(ckpt_dir.glob("ckpt_*.pt")) if ckpt_dir.exists() else []
+    for one_dir in ckpt_dirs:
+        val_losses = np.full((min_ckpts,), np.nan, dtype=np.float32)
+        ckpt_files = sorted(one_dir.glob("ckpt_*.pt")) if one_dir.exists() else []
 
-    # Build step → val_loss map from checkpoints
-    step_to_val: Dict[int, float] = {}
-    for ckpt_file in ckpt_files:
-        try:
-            # Register ModelConfig as safe for torch.load
-            torch.serialization.add_safe_globals([ModelConfig])
-            ckpt = torch.load(ckpt_file, map_location="cpu", weights_only=True)
-            step_to_val[ckpt["step"]] = float(ckpt.get("val_loss", np.nan))
-        except Exception:
-            continue
+        step_to_val: Dict[int, float] = {}
+        for ckpt_file in ckpt_files:
+            try:
+                torch.serialization.add_safe_globals([ModelConfig])
+                ckpt = torch.load(ckpt_file, map_location="cpu", weights_only=True)
+                step_to_val[int(ckpt["step"])] = float(ckpt.get("val_loss", np.nan))
+            except Exception:
+                continue
 
-    for i, step in enumerate(steps):
-        if int(step) in step_to_val:
-            val_losses[i] = step_to_val[int(step)]
+        for i, step in enumerate(steps):
+            if int(step) in step_to_val:
+                val_losses[i] = step_to_val[int(step)]
 
-    # Fill NaN gaps with linear interpolation
-    valid_mask = ~np.isnan(val_losses)
-    if valid_mask.sum() >= 2:
-        interp_indices = np.arange(min_ckpts)
-        val_losses = np.interp(
-            interp_indices,
-            interp_indices[valid_mask],
-            val_losses[valid_mask],
-        )
+        valid_mask = ~np.isnan(val_losses)
+        if valid_mask.sum() >= 2:
+            interp_indices = np.arange(min_ckpts)
+            val_losses = np.interp(
+                interp_indices,
+                interp_indices[valid_mask],
+                val_losses[valid_mask],
+            )
+        per_dir_losses.append(val_losses)
+
+    if per_dir_losses:
+        val_losses = np.nanmean(np.stack(per_dir_losses, axis=0), axis=0).astype(np.float32)
+    else:
+        val_losses = np.full((min_ckpts,), np.nan, dtype=np.float32)
 
     return {
         "steps":    steps,
@@ -304,6 +309,76 @@ def compute_discontinuity_score(
         return 0.0
 
     return float(max_slope / mean_slope)
+
+
+def compute_induction_validation_summary(
+    run_results: List[Dict],
+) -> Dict[str, object]:
+    """
+    Summarize whether engineered induction evidence aligns with natural-repeat
+    induction scores when those auxiliary probes are available.
+    """
+
+    available = [
+        result for result in run_results
+        if result.get("natural_induction_score_tensor") is not None
+    ]
+    if not available:
+        return {
+            "available": False,
+            "n_runs_with_natural": 0,
+        }
+
+    final_corrs: List[float] = []
+    final_active_means: List[float] = []
+    final_inactive_means: List[float] = []
+    all_corrs: List[float] = []
+
+    for result in available:
+        natural = np.asarray(result["natural_induction_score_tensor"], dtype=np.float32)
+        engineered = np.asarray(result["score_tensor"][..., 2], dtype=np.float32)
+        active = np.asarray(result["active_behavior_tensor"][..., 2], dtype=bool)
+
+        natural_final = natural[-1].reshape(-1)
+        engineered_final = engineered[-1].reshape(-1)
+        active_final = active[-1].reshape(-1)
+
+        if np.std(natural_final) > 1e-8 and np.std(engineered_final) > 1e-8:
+            final_corrs.append(float(np.corrcoef(engineered_final, natural_final)[0, 1]))
+
+        if active_final.any():
+            final_active_means.append(float(natural_final[active_final].mean()))
+        if (~active_final).any():
+            final_inactive_means.append(float(natural_final[~active_final].mean()))
+
+        natural_all = natural.reshape(-1)
+        engineered_all = engineered.reshape(-1)
+        finite = np.isfinite(natural_all) & np.isfinite(engineered_all)
+        if finite.sum() >= 2:
+            nat = natural_all[finite]
+            eng = engineered_all[finite]
+            if np.std(nat) > 1e-8 and np.std(eng) > 1e-8:
+                all_corrs.append(float(np.corrcoef(eng, nat)[0, 1]))
+
+    active_mean = float(np.mean(final_active_means)) if final_active_means else None
+    inactive_mean = float(np.mean(final_inactive_means)) if final_inactive_means else None
+    return {
+        "available": True,
+        "n_runs_with_natural": len(available),
+        "engineered_vs_natural_corr_final_mean": (
+            float(np.mean(final_corrs)) if final_corrs else None
+        ),
+        "engineered_vs_natural_corr_all_ckpts_mean": (
+            float(np.mean(all_corrs)) if all_corrs else None
+        ),
+        "natural_score_mean_final_for_active_induction": active_mean,
+        "natural_score_mean_final_for_inactive_induction": inactive_mean,
+        "natural_score_gap_final": (
+            float(active_mean - inactive_mean)
+            if active_mean is not None and inactive_mean is not None
+            else None
+        ),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

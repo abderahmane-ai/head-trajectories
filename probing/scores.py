@@ -15,6 +15,7 @@ All functions operate on a single head's attention maps across all sequences.
 The pipeline calls them per (layer, head) pair at each checkpoint.
 """
 
+import math
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -244,11 +245,11 @@ def positional_score(
 # 5. Semantic Score
 # ─────────────────────────────────────────────────────────────────────────────
 
-def semantic_score(
+def semantic_score_detailed(
     attn_head:        AttentionHead,
     token_ids:        torch.Tensor,
     embedding_matrix: torch.Tensor,
-) -> float:
+) -> Dict[str, float | int | bool]:
     """
     Measure alignment between attention weights and semantic token similarity.
 
@@ -275,8 +276,16 @@ def semantic_score(
         embedding_matrix: (V, D)    — model's current token embedding weights
 
     Returns:
-        semantic_score — Pearson correlation averaged across positions and seqs
-                         Typically in [-1, 1]; positive values indicate alignment
+        Dict containing:
+          - score: mean Pearson correlation across valid positions or NaN if undefined
+          - n_candidate_positions: total (sequence, query-position) pairs considered
+          - n_used_positions: pairs that contributed finite correlations
+          - n_short_mask_positions: pairs excluded because fewer than 6 keys remained
+          - n_zero_variance_positions: pairs excluded because attention or similarity
+            variance collapsed after masking
+          - n_nonfinite_positions: pairs excluded due to NaN/Inf correlation
+          - valid_fraction: n_used_positions / n_candidate_positions
+          - is_defined: whether at least one valid correlation was observed
     """
 
     N, T = token_ids.shape
@@ -297,6 +306,11 @@ def semantic_score(
     # Extract valid attention and similarity vectors
     # For each position i >= 4, we want attn[s, i, :i+1] and sim[s, i, :i+1]
     correlations = []
+    n_candidate_positions = int(N * max(T - 4, 0))
+    n_used_positions = 0
+    n_short_mask_positions = 0
+    n_zero_variance_positions = 0
+    n_nonfinite_positions = 0
     
     for i in valid_positions:
         i_int = i.item()
@@ -315,6 +329,7 @@ def semantic_score(
         
         # Require minimum 6 valid points for stable Pearson
         if mask.sum().item() < 6:
+            n_short_mask_positions += int(N)
             continue
         
         attn_window = attn_window[:, mask]  # apply mask to attention slice
@@ -337,19 +352,77 @@ def semantic_score(
         
         # Compute correlation, filtering out degenerate cases
         valid_mask = (attn_std > 1e-8) & (sim_std > 1e-8)
+        n_zero_variance_positions += int((~valid_mask).sum().item())
         if valid_mask.any():
             corr = cov[valid_mask] / (attn_std[valid_mask] * sim_std[valid_mask])
             # Filter out NaN/Inf
             finite_mask = torch.isfinite(corr)
+            n_nonfinite_positions += int((~finite_mask).sum().item())
             if finite_mask.any():
-                correlations.append(corr[finite_mask])
-    
+                finite_corr = corr[finite_mask]
+                correlations.append(finite_corr)
+                n_used_positions += int(finite_corr.numel())
+
     if len(correlations) == 0:
-        return 0.0
-    
-    # Concatenate all valid correlations and compute mean
-    all_corr = torch.cat(correlations)
-    return float(all_corr.mean().item())
+        score = math.nan
+    else:
+        all_corr = torch.cat(correlations)
+        score = float(all_corr.mean().item())
+
+    valid_fraction = (
+        float(n_used_positions) / float(n_candidate_positions)
+        if n_candidate_positions > 0
+        else 0.0
+    )
+    return {
+        "score": score,
+        "n_candidate_positions": n_candidate_positions,
+        "n_used_positions": n_used_positions,
+        "n_short_mask_positions": n_short_mask_positions,
+        "n_zero_variance_positions": n_zero_variance_positions,
+        "n_nonfinite_positions": n_nonfinite_positions,
+        "valid_fraction": valid_fraction,
+        "is_defined": bool(n_used_positions > 0),
+    }
+
+
+def semantic_score(
+    attn_head:        AttentionHead,
+    token_ids:        torch.Tensor,
+    embedding_matrix: torch.Tensor,
+) -> float:
+    """
+    Backward-compatible scalar wrapper around `semantic_score_detailed`.
+
+    Undefined semantic measurements return 0.0 here for legacy callers, but the
+    probing pipeline uses the detailed variant so undefinedness is preserved in
+    saved metadata and downstream classification.
+    """
+
+    details = semantic_score_detailed(attn_head, token_ids, embedding_matrix)
+    score = float(details["score"])
+    return 0.0 if not math.isfinite(score) else score
+
+
+def score_head_detailed(
+    general_attn:     AttentionHead,
+    induction_attn:   AttentionHead,
+    positional_attn:  AttentionHead,
+    induction_p1:     torch.Tensor,
+    induction_p2:     torch.Tensor,
+    positional_pairs: torch.Tensor,
+    token_ids:        torch.Tensor,
+    embedding_matrix: torch.Tensor,
+) -> Tuple[Tuple[float, float, float, float, float], Dict[str, float | int | bool]]:
+    """Compute all five scores plus semantic measurement diagnostics."""
+
+    s_sink = sink_score(general_attn)
+    s_prev = prev_token_score(general_attn)
+    s_ind = induction_score(induction_attn, induction_p1, induction_p2)
+    s_pos = positional_score(positional_attn, positional_pairs)
+    semantic_details = semantic_score_detailed(general_attn, token_ids, embedding_matrix)
+    s_sem = float(semantic_details["score"])
+    return (s_sink, s_prev, s_ind, s_pos, s_sem), semantic_details
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -383,10 +456,21 @@ def score_head(
         (sink, prev_token, induction, positional, semantic) scores
     """
 
-    s_sink     = sink_score(general_attn)
-    s_prev     = prev_token_score(general_attn)
-    s_ind      = induction_score(induction_attn, induction_p1, induction_p2)
-    s_pos      = positional_score(positional_attn, positional_pairs)
-    s_sem      = semantic_score(general_attn, token_ids, embedding_matrix)
-
-    return s_sink, s_prev, s_ind, s_pos, s_sem
+    scores, semantic_details = score_head_detailed(
+        general_attn,
+        induction_attn,
+        positional_attn,
+        induction_p1,
+        induction_p2,
+        positional_pairs,
+        token_ids,
+        embedding_matrix,
+    )
+    s_sink, s_prev, s_ind, s_pos, s_sem = scores
+    return (
+        s_sink,
+        s_prev,
+        s_ind,
+        s_pos,
+        0.0 if not bool(semantic_details["is_defined"]) else s_sem,
+    )

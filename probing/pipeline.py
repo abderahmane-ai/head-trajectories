@@ -21,7 +21,7 @@ import torch
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from .extractor import extract_checkpoint, CheckpointExtraction
-from .scores import natural_induction_score, score_head
+from .scores import natural_induction_score, score_head_detailed
 from .classifier import (
     DEFAULT_DOMINANCE_MARGIN,
     DEFAULT_FDR_ALPHA,
@@ -165,7 +165,7 @@ def score_all_heads(
                 else None
             )
 
-            scores = score_head(
+            scores, semantic_details = score_head_detailed(
                 general_attn=general_head,
                 induction_attn=induction_head,
                 positional_attn=positional_head,
@@ -195,6 +195,8 @@ def score_all_heads(
                 head=head,
                 scores=scores,
                 natural_induction_score=natural_score,
+                semantic_valid_fraction=float(semantic_details["valid_fraction"]),
+                semantic_is_defined=bool(semantic_details["is_defined"]),
             )
 
 
@@ -358,6 +360,10 @@ def run_probing_pipeline(
         classifier.natural_induction_score_tensor = partial.get(
             "natural_induction_score_tensor"
         )
+        if "semantic_valid_fraction_tensor" in partial:
+            classifier.semantic_valid_fraction_tensor = partial["semantic_valid_fraction_tensor"]
+        if "semantic_defined_tensor" in partial:
+            classifier.semantic_defined_tensor = partial["semantic_defined_tensor"]
         classifier.step_index = partial["step_index"]
 
     # ── Process each checkpoint ──────────────────────────────────────────────

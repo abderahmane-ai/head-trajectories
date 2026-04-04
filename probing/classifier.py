@@ -156,8 +156,12 @@ def validate_pooled_null_scores(
         raise ValueError(
             f"Need at least 10 pooled null samples for empirical inference, got {arr.shape[0]}"
         )
-    if not np.all(np.isfinite(arr)):
-        raise ValueError("pooled_null_scores must be finite")
+    finite_per_metric = np.isfinite(arr).sum(axis=0)
+    if np.any(finite_per_metric < 10):
+        raise ValueError(
+            "pooled_null_scores must provide at least 10 finite samples per metric, "
+            f"got counts {finite_per_metric.tolist()}"
+        )
     return arr
 
 
@@ -172,9 +176,17 @@ def empirical_p_values(
     if score_arr.shape != (5,):
         raise ValueError(f"scores must be shape (5,), got {score_arr.shape}")
 
-    exceedances = (null_arr >= score_arr[None, :]).sum(axis=0).astype(np.float32)
-    denom = float(null_arr.shape[0] + 1)
-    return (exceedances + 1.0) / denom
+    p_values = np.ones(5, dtype=np.float32)
+    for metric_idx in range(5):
+        score = score_arr[metric_idx]
+        if not np.isfinite(score):
+            p_values[metric_idx] = 1.0
+            continue
+        finite_null = null_arr[:, metric_idx]
+        finite_null = finite_null[np.isfinite(finite_null)]
+        exceedances = float((finite_null >= score).sum())
+        p_values[metric_idx] = (exceedances + 1.0) / float(finite_null.shape[0] + 1)
+    return p_values
 
 
 def null_effect_sizes(
@@ -234,12 +246,16 @@ def classify_head_details(
     """
 
     score_arr = np.array(scores, dtype=np.float32)
+    invalid_mask = ~np.isfinite(score_arr)
     raw_thresholds, effective_thresholds, _, _ = prepare_thresholds(
         thresholds,
         warn=False,
     )
-    normalized = score_arr / effective_thresholds
-    threshold_flags = score_arr >= raw_thresholds
+    normalized = np.full(5, np.nan, dtype=np.float32)
+    finite_mask = ~invalid_mask
+    normalized[finite_mask] = score_arr[finite_mask] / effective_thresholds[finite_mask]
+    threshold_flags = np.zeros(5, dtype=bool)
+    threshold_flags[finite_mask] = score_arr[finite_mask] >= raw_thresholds[finite_mask]
     n_behaviors_above_threshold = int(threshold_flags.sum())
 
     if pooled_null_scores is None:
@@ -253,8 +269,9 @@ def classify_head_details(
                 stacklevel=2,
             )
             _LEGACY_FALLBACK_WARNED = True
-        if np.all(score_arr < raw_thresholds):
-            legacy_order = np.argsort(normalized)[::-1]
+        normalized_for_order = np.where(np.isfinite(normalized), normalized, -np.inf)
+        if np.all(~threshold_flags):
+            legacy_order = np.argsort(normalized_for_order)[::-1]
             return ClassificationResult(
                 label=LABEL_WEAK,
                 is_tie=False,
@@ -265,13 +282,13 @@ def classify_head_details(
                 effect_sizes=np.zeros(5, dtype=np.float32),
                 primary_behavior=int(legacy_order[0]),
                 runner_up_behavior=int(legacy_order[1]),
-                dominant_margin=float(normalized[legacy_order[0]] - normalized[legacy_order[1]]),
+                dominant_margin=float(normalized_for_order[legacy_order[0]] - normalized_for_order[legacy_order[1]]),
                 n_behaviors_above_threshold=n_behaviors_above_threshold,
                 n_active_behaviors=0,
             )
 
-        sort_idx = np.argsort(normalized)[::-1]
-        top1, top2 = float(normalized[sort_idx[0]]), float(normalized[sort_idx[1]])
+        sort_idx = np.argsort(normalized_for_order)[::-1]
+        top1, top2 = float(normalized_for_order[sort_idx[0]]), float(normalized_for_order[sort_idx[1]])
         is_tie = (top1 - top2) < tie_tolerance
         label = LABEL_AMBIGUOUS if is_tie else BEHAVIOR_TO_LABEL[int(sort_idx[0])]
         active_behaviors = threshold_flags.astype(bool)
@@ -293,6 +310,9 @@ def classify_head_details(
     p_values = empirical_p_values(score_arr, pooled_null_scores)
     effect_sizes = null_effect_sizes(p_values)
     active_behaviors = bh_fdr_mask(p_values, alpha=fdr_alpha)
+    active_behaviors[invalid_mask] = False
+    effect_sizes[invalid_mask] = 0.0
+    p_values[invalid_mask] = 1.0
     n_active = int(active_behaviors.sum())
 
     order = np.argsort(effect_sizes)[::-1]
@@ -416,6 +436,8 @@ class HeadClassifier:
         self.dominant_margin_tensor = torch.zeros((n_checkpoints, n_layers, n_heads), dtype=torch.float32)
         self.behavior_count_tensor = torch.zeros((n_checkpoints, n_layers, n_heads), dtype=torch.int32)
         self.natural_induction_score_tensor: Optional[torch.Tensor] = None
+        self.semantic_valid_fraction_tensor = torch.zeros((n_checkpoints, n_layers, n_heads), dtype=torch.float32)
+        self.semantic_defined_tensor = torch.zeros((n_checkpoints, n_layers, n_heads), dtype=torch.bool)
         self.step_index: List[int] = []
         self._ties: List[Dict] = []
 
@@ -427,6 +449,8 @@ class HeadClassifier:
         head: int,
         scores: Tuple[float, float, float, float, float],
         natural_induction_score: Optional[float] = None,
+        semantic_valid_fraction: Optional[float] = None,
+        semantic_is_defined: Optional[bool] = None,
     ) -> int:
         result = classify_head_details(
             scores=scores,
@@ -449,6 +473,10 @@ class HeadClassifier:
         self.runner_up_tensor[ckpt_idx, layer, head] = result.runner_up_behavior
         self.dominant_margin_tensor[ckpt_idx, layer, head] = result.dominant_margin
         self.behavior_count_tensor[ckpt_idx, layer, head] = result.n_active_behaviors
+        if semantic_valid_fraction is not None:
+            self.semantic_valid_fraction_tensor[ckpt_idx, layer, head] = float(semantic_valid_fraction)
+        if semantic_is_defined is not None:
+            self.semantic_defined_tensor[ckpt_idx, layer, head] = bool(semantic_is_defined)
 
         if natural_induction_score is not None:
             if self.natural_induction_score_tensor is None:
@@ -520,6 +548,8 @@ class HeadClassifier:
                 "runner_up_tensor": self.runner_up_tensor,
                 "dominant_margin_tensor": self.dominant_margin_tensor,
                 "behavior_count_tensor": self.behavior_count_tensor,
+                "semantic_valid_fraction_tensor": self.semantic_valid_fraction_tensor,
+                "semantic_defined_tensor": self.semantic_defined_tensor,
                 "step_index": self.step_index,
                 "seed": self.seed,
                 "n_layers": self.n_layers,
@@ -583,6 +613,17 @@ class HeadClassifier:
             data["fdr_correction_scope"] = FDR_CORRECTION_SCOPE
         if "dominance_margin" not in data:
             data["dominance_margin"] = DEFAULT_DOMINANCE_MARGIN
+        if "semantic_valid_fraction_tensor" not in data:
+            score_tensor = data["score_tensor"]
+            semantic_scores = np.asarray(score_tensor[..., 4], dtype=np.float32)
+            data["semantic_valid_fraction_tensor"] = torch.where(
+                torch.tensor(np.isfinite(semantic_scores), dtype=torch.bool),
+                torch.ones_like(torch.tensor(semantic_scores, dtype=torch.float32)),
+                torch.zeros_like(torch.tensor(semantic_scores, dtype=torch.float32)),
+            )
+        if "semantic_defined_tensor" not in data:
+            semantic_valid_fraction = np.asarray(data["semantic_valid_fraction_tensor"], dtype=np.float32)
+            data["semantic_defined_tensor"] = torch.tensor(semantic_valid_fraction > 0.0, dtype=torch.bool)
 
         if "active_behavior_tensor" not in data:
             score_tensor = data["score_tensor"]

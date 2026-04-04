@@ -25,11 +25,12 @@ Output figures:
 """
 
 import argparse
+import re
 import time
 import numpy as np
 import torch
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from analysis import (
     load_run_results,
@@ -48,6 +49,7 @@ from analysis import (
     compute_per_type_stability,
     print_stability_report,
     compute_induction_count_curve,
+    compute_induction_validation_summary,
     extract_val_loss_curve,
     find_crossing_steps,
     detect_val_loss_inflection,
@@ -106,8 +108,19 @@ def parse_args() -> argparse.Namespace:
 # Results discovery
 # ─────────────────────────────────────────────────────────────────────────────
 
-PRIMARY_LABELS  = ["seed42", "seed123", "seed777"]
+LEGACY_PRIMARY_LABELS = ["seed42", "seed123", "seed777"]
 ABLATION_LABEL  = "ablation_6m"
+
+
+def _result_sort_key(label: str) -> Tuple[int, int | str]:
+    """Keep historical seed ordering when possible, but support arbitrary labels."""
+
+    if label == ABLATION_LABEL:
+        return (2, label)
+    match = re.fullmatch(r"seed(\d+)", label)
+    if match:
+        return (0, int(match.group(1)))
+    return (1, label)
 
 
 def discover_results(
@@ -123,22 +136,22 @@ def discover_results(
     """
 
     loaded: Dict[str, Dict] = {}
+    result_paths = sorted(results_dir.glob("results_*.pt"))
+    if not result_paths:
+        print(f"  [Missing] No results_*.pt files found in {results_dir}")
+        return loaded
 
-    for label in PRIMARY_LABELS:
-        path = results_dir / f"results_{label}.pt"
-        if path.exists():
-            print(f"  [Load] {path.name}")
-            loaded[label] = load_run_results(path)
-        else:
-            print(f"  [Missing] {path.name} — skipping")
+    seen_legacy = {path.stem.replace("results_", "", 1) for path in result_paths}
+    for legacy_label in LEGACY_PRIMARY_LABELS:
+        if legacy_label not in seen_legacy:
+            print(f"  [Missing] results_{legacy_label}.pt — skipping")
 
-    if not skip_ablation:
-        abl_path = results_dir / f"results_{ABLATION_LABEL}.pt"
-        if abl_path.exists():
-            print(f"  [Load] {abl_path.name}")
-            loaded[ABLATION_LABEL] = load_run_results(abl_path)
-        else:
-            print(f"  [Missing] {abl_path.name} — ablation analysis will be skipped")
+    for path in sorted(result_paths, key=lambda p: _result_sort_key(p.stem.replace("results_", "", 1))):
+        label = path.stem.replace("results_", "", 1)
+        if skip_ablation and label == ABLATION_LABEL:
+            continue
+        print(f"  [Load] {path.name}")
+        loaded[label] = load_run_results(path)
 
     return loaded
 
@@ -174,11 +187,11 @@ def main() -> None:
     # ── Load results ─────────────────────────────────────────────────────────
     all_results = discover_results(args.results_dir, args.skip_ablation)
 
-    primary_results = [
-        all_results[label]
-        for label in PRIMARY_LABELS
-        if label in all_results
+    primary_labels = [
+        label for label in sorted(all_results, key=_result_sort_key)
+        if label != ABLATION_LABEL
     ]
+    primary_results = [all_results[label] for label in primary_labels]
 
     if len(primary_results) < args.min_seeds:
         print(
@@ -326,7 +339,7 @@ def main() -> None:
     induction_curve = compute_induction_count_curve(primary_results)
     val_loss_curve  = extract_val_loss_curve(
         primary_results,
-        ckpt_dir=args.ckpt_root / "seed42",
+        ckpt_dir=[args.ckpt_root / label for label in primary_labels],
     )
     crossing_steps  = find_crossing_steps(
         induction_curve, fractions=[0.10, 0.25, 0.50]
@@ -367,6 +380,28 @@ def main() -> None:
             for tensor in natural_induction_tensors
         ]
         print(f"  Natural induction (final mean raw score): {np.mean(final_natural_scores):.4f}")
+    induction_validation = compute_induction_validation_summary(primary_results)
+    if induction_validation["available"]:
+        gap = induction_validation["natural_score_gap_final"]
+        if gap is None:
+            print("  Natural induction validation gap (active - inactive, final): unavailable")
+        else:
+            print(f"  Natural induction validation gap (active - inactive, final): {gap:.4f}")
+
+    semantic_valid_fractions = [
+        np.asarray(r.get("semantic_valid_fraction_tensor")[-1]).mean()
+        for r in primary_results
+        if r.get("semantic_valid_fraction_tensor") is not None
+    ]
+    semantic_defined_fractions = [
+        np.asarray(r.get("semantic_defined_tensor")[-1]).mean()
+        for r in primary_results
+        if r.get("semantic_defined_tensor") is not None
+    ]
+    if semantic_valid_fractions:
+        print(f"  Semantic valid-fraction mean (final): {float(np.mean(semantic_valid_fractions)):.4f}")
+    if semantic_defined_fractions:
+        print(f"  Semantic defined-head fraction (final): {float(np.mean(semantic_defined_fractions)):.4f}")
 
     # Figure 3: phase transition dual-axis plot
     plot_phase_transition(
@@ -480,8 +515,9 @@ def main() -> None:
     print(_verdict(h5, "H5 — Sink Persistence"))
     print(f"{'─' * 64}")
 
-    n_supported = sum([h1, h2, h3, h4, h5])
-    print(f"  {n_supported}/5 hypotheses supported")
+    verdict_flags = [activation_h1, dominance_h1, activation_h2, dominance_h2, h3, h4, h5]
+    n_supported = sum(bool(flag) for flag in verdict_flags)
+    print(f"  {n_supported}/{len(verdict_flags)} hypothesis checks supported")
 
     # ─────────────────────────────────────────────────────────────────────────
     # FIGURES SUMMARY

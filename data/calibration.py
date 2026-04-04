@@ -22,7 +22,7 @@ import numpy as np
 import torch
 
 from model import ModelConfig, TransformerLM
-from probing.scores import score_head
+from probing.scores import score_head_detailed
 
 
 METRIC_NAMES: Tuple[str, ...] = (
@@ -64,8 +64,22 @@ def empirical_null_p_values(
             "pooled_null_scores must have shape (n_null_samples, 5), "
             f"got {null_arr.shape}"
         )
-    exceedances = (null_arr >= score_arr[None, :]).sum(axis=0).astype(np.float32)
-    return (exceedances + 1.0) / float(null_arr.shape[0] + 1)
+    p_values = np.ones(5, dtype=np.float32)
+    for metric_idx in range(5):
+        score = score_arr[metric_idx]
+        if not np.isfinite(score):
+            p_values[metric_idx] = 1.0
+            continue
+        finite_null = null_arr[:, metric_idx]
+        finite_null = finite_null[np.isfinite(finite_null)]
+        if finite_null.shape[0] < 10:
+            raise ValueError(
+                f"Need at least 10 finite pooled null samples for metric {metric_idx}, "
+                f"got {finite_null.shape[0]}"
+            )
+        exceedances = float((finite_null >= score).sum())
+        p_values[metric_idx] = (exceedances + 1.0) / float(finite_null.shape[0] + 1)
+    return p_values
 
 
 def empirical_null_effect_sizes(
@@ -188,10 +202,10 @@ def _compute_threshold_statistics(
         thresholds, means, stds, quantiles_p95, quantiles_p99
     """
 
-    means = scores_arr.mean(axis=0)
-    stds = scores_arr.std(axis=0)
-    quantiles_p95 = np.quantile(scores_arr, 0.95, axis=0)
-    quantiles_p99 = np.quantile(scores_arr, SEMANTIC_THRESHOLD_QUANTILE, axis=0)
+    means = np.nanmean(scores_arr, axis=0)
+    stds = np.nanstd(scores_arr, axis=0)
+    quantiles_p95 = np.nanquantile(scores_arr, 0.95, axis=0)
+    quantiles_p99 = np.nanquantile(scores_arr, SEMANTIC_THRESHOLD_QUANTILE, axis=0)
 
     thresholds = means + 2.0 * stds
     thresholds[SEMANTIC_METRIC_INDEX] = quantiles_p99[SEMANTIC_METRIC_INDEX]
@@ -262,7 +276,7 @@ def _calibrate_thresholds_single(
         positional_layer = positional_maps[layer_idx]
 
         for head_idx in range(config.n_heads):
-            scores = score_head(
+            scores, _ = score_head_detailed(
                 general_attn=general_layer[:, head_idx, :, :],
                 induction_attn=induction_layer[:, head_idx, :, :],
                 positional_attn=positional_layer[:, head_idx, :, :],

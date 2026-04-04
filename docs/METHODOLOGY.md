@@ -177,7 +177,7 @@ These are used to test whether a head’s attention pattern is driven by **posit
 
 ### 4.4 Natural induction probes
 
-Natural induction probes are real held-out sequences that already contain repeated subsequences. For each such probe, the dataset stores:
+Natural induction probes are real held-out sequences that already contain repeated subsequences. They are used as an auxiliary validation family for the engineered induction metric when the corpus can support them. For each such probe, the dataset stores:
 
 - a token sequence $x^{\text{nat-ind}}_n$
 - $p^{(1)}_n$: start index of the first natural occurrence
@@ -348,7 +348,7 @@ Interpretation:
 
 ### 5.5 Semantic score
 
-**Intuition:** a semantic head should attend to tokens whose meanings are similar to the query token.
+**Intuition:** a semantic head should attend to tokens whose meanings are similar to the query token in the model's **current internal representation space**.
 
 Let $E \in \mathbb{R}^{V \times d}$ be the model’s **current checkpoint embedding matrix**, and define row-normalized embeddings:
 
@@ -388,7 +388,7 @@ $$
 - $j = t-1$ (previous-token position, confounds with prev-token heads)
 - $j = 0$ (sink position, confounds with sink heads)
 
-Let $M_{n,t}$ be the mask that excludes these positions. We require $|M_{n,t}| \ge 6$ (minimum 6 valid points for stable Pearson correlation). If fewer than 6 points remain after masking, position $t$ is skipped.
+Let $M_{n,t}$ be the mask that excludes these positions. We require $|M_{n,t}| \ge 6$ (minimum 6 valid points for stable Pearson correlation). If fewer than 6 points remain after masking, position $t$ is excluded from the semantic statistic for that head/query position.
 
 Then compute the Pearson correlation on the masked vectors:
 
@@ -414,6 +414,11 @@ s_{\text{sem}}
 $$
 
 where $\mathcal{V}$ is the set of valid sequence-position pairs with sufficient unmasked points.
+
+Implementation note:
+
+- The probing pipeline now records semantic measurement validity explicitly (valid fraction and defined/undefined status per head/checkpoint).
+- If a head has no valid semantic sequence-position pairs at a checkpoint, the semantic statistic is treated as **undefined** for inference purposes and does not contribute semantic evidence to the classifier.
 
 Interpretation:
 

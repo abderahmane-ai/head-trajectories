@@ -13,7 +13,9 @@ from .scores import (
     natural_induction_score,
     positional_score,
     semantic_score,
+    semantic_score_detailed,
     score_head,
+    score_head_detailed,
 )
 from .classifier import (
     HeadClassifier,
@@ -58,7 +60,9 @@ __all__ = [
     "natural_induction_score",
     "positional_score",
     "semantic_score",
+    "semantic_score_detailed",
     "score_head",
+    "score_head_detailed",
     "HeadClassifier",
     "classify_head",
     "classify_head_details",

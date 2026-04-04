@@ -19,7 +19,7 @@ from probing import (
     DEFAULT_DOMINANCE_MARGIN,
     DEFAULT_FDR_ALPHA,
     HEAD_TYPES,
-    classify_head,
+    classify_head_details,
 )
 from .trajectories import (
     compute_activation_curves,
@@ -28,13 +28,31 @@ from .trajectories import (
 )
 
 
-def _clone_result_with_labels(
+def _clone_result_with_reclassification(
     result: Dict,
     label_tensor: torch.Tensor,
+    active_behavior_tensor: torch.Tensor,
+    p_value_tensor: torch.Tensor,
+    effect_size_tensor: torch.Tensor,
+    threshold_flag_tensor: torch.Tensor,
+    normalized_score_tensor: torch.Tensor,
+    primary_behavior_tensor: torch.Tensor,
+    runner_up_tensor: torch.Tensor,
+    dominant_margin_tensor: torch.Tensor,
+    behavior_count_tensor: torch.Tensor,
 ) -> Dict:
     clone = dict(result)
     clone["label_tensor"] = label_tensor
     clone["dominant_label_tensor"] = label_tensor
+    clone["active_behavior_tensor"] = active_behavior_tensor
+    clone["p_value_tensor"] = p_value_tensor
+    clone["effect_size_tensor"] = effect_size_tensor
+    clone["threshold_flag_tensor"] = threshold_flag_tensor
+    clone["normalized_score_tensor"] = normalized_score_tensor
+    clone["primary_behavior_tensor"] = primary_behavior_tensor
+    clone["runner_up_tensor"] = runner_up_tensor
+    clone["dominant_margin_tensor"] = dominant_margin_tensor
+    clone["behavior_count_tensor"] = behavior_count_tensor
     return clone
 
 
@@ -56,18 +74,50 @@ def _reclassify_result(
         raise ValueError("Result is missing pooled_null_scores required for FDR reclassification")
 
     new_labels = torch.zeros((n_ckpts, n_layers, n_heads), dtype=torch.int32)
+    threshold_flag_tensor = torch.zeros((n_ckpts, n_layers, n_heads, 5), dtype=torch.bool)
+    normalized_score_tensor = torch.zeros((n_ckpts, n_layers, n_heads, 5), dtype=torch.float32)
+    active_behavior_tensor = torch.zeros((n_ckpts, n_layers, n_heads, 5), dtype=torch.bool)
+    p_value_tensor = torch.ones((n_ckpts, n_layers, n_heads, 5), dtype=torch.float32)
+    effect_size_tensor = torch.zeros((n_ckpts, n_layers, n_heads, 5), dtype=torch.float32)
+    primary_behavior_tensor = torch.full((n_ckpts, n_layers, n_heads), -1, dtype=torch.int32)
+    runner_up_tensor = torch.full((n_ckpts, n_layers, n_heads), -1, dtype=torch.int32)
+    dominant_margin_tensor = torch.zeros((n_ckpts, n_layers, n_heads), dtype=torch.float32)
+    behavior_count_tensor = torch.zeros((n_ckpts, n_layers, n_heads), dtype=torch.int32)
     for ckpt in range(n_ckpts):
         for layer in range(n_layers):
             for head in range(n_heads):
-                label, _ = classify_head(
+                details = classify_head_details(
                     tuple(score_tensor[ckpt, layer, head].tolist()),
                     thresholds=thresholds,
                     pooled_null_scores=null_scores,
                     fdr_alpha=alpha,
                     dominance_margin=float(result.get("dominance_margin", DEFAULT_DOMINANCE_MARGIN)),
                 )
-                new_labels[ckpt, layer, head] = label
-    return _clone_result_with_labels(result, new_labels)
+                new_labels[ckpt, layer, head] = details.label
+                threshold_flag_tensor[ckpt, layer, head] = torch.tensor(details.threshold_flags, dtype=torch.bool)
+                normalized_score_tensor[ckpt, layer, head] = torch.tensor(details.normalized_scores, dtype=torch.float32)
+                active_behavior_tensor[ckpt, layer, head] = torch.tensor(details.active_behaviors, dtype=torch.bool)
+                p_value_tensor[ckpt, layer, head] = torch.tensor(details.p_values, dtype=torch.float32)
+                effect_size_tensor[ckpt, layer, head] = torch.tensor(details.effect_sizes, dtype=torch.float32)
+                primary_behavior_tensor[ckpt, layer, head] = int(details.primary_behavior)
+                runner_up_tensor[ckpt, layer, head] = int(details.runner_up_behavior)
+                dominant_margin_tensor[ckpt, layer, head] = float(details.dominant_margin)
+                behavior_count_tensor[ckpt, layer, head] = int(details.n_active_behaviors)
+    clone = _clone_result_with_reclassification(
+        result,
+        new_labels,
+        active_behavior_tensor,
+        p_value_tensor,
+        effect_size_tensor,
+        threshold_flag_tensor,
+        normalized_score_tensor,
+        primary_behavior_tensor,
+        runner_up_tensor,
+        dominant_margin_tensor,
+        behavior_count_tensor,
+    )
+    clone["fdr_alpha"] = float(alpha)
+    return clone
 
 
 def extract_ordering_conclusions(

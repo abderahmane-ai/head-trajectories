@@ -19,6 +19,7 @@ from analysis import (
     compute_global_curves,
     compute_head_trajectories,
     compute_induction_count_curve,
+    compute_induction_validation_summary,
     compute_mixed_behavior_summary,
     compute_onset_bootstrap_cis,
     compute_per_layer_curves,
@@ -1012,6 +1013,17 @@ def analyze_single_run(
     )
     fdr_sensitivity = run_fdr_sensitivity([results], alphas=[0.01, 0.05, 0.10])
     null_subsample_stability = compute_null_subsample_stability([results], alpha=0.05, threshold_frac=0.05)
+    induction_validation = compute_induction_validation_summary([results])
+    semantic_valid_fraction = (
+        float(np.asarray(results["semantic_valid_fraction_tensor"][-1]).mean())
+        if results.get("semantic_valid_fraction_tensor") is not None
+        else None
+    )
+    semantic_defined_fraction = (
+        float(np.asarray(results["semantic_defined_tensor"][-1]).mean())
+        if results.get("semantic_defined_tensor") is not None
+        else None
+    )
 
     timeline_path = paths.figures_dir / f"timeline_seed{seed}.png"
     dominant_heatmap_path = paths.figures_dir / f"dominant_type_heatmap_seed{seed}.png"
@@ -1094,6 +1106,9 @@ def analyze_single_run(
             if results.get("natural_induction_score_tensor") is not None
             else None
         ),
+        "induction_validation": induction_validation,
+        "semantic_valid_fraction_final": semantic_valid_fraction,
+        "semantic_defined_fraction_final": semantic_defined_fraction,
         "fdr_sensitivity": fdr_sensitivity["robustness_summary"],
         "null_subsample_stability": null_subsample_stability["match_rates"],
         "sink_persistence": {
@@ -1176,6 +1191,17 @@ def analyze_profile_group(
         exclude_positional_init=True,
     )
     mixed_behavior = compute_mixed_behavior_summary(run_results)
+    induction_validation = compute_induction_validation_summary(run_results)
+    semantic_valid_fractions = [
+        float(np.asarray(result["semantic_valid_fraction_tensor"][-1]).mean())
+        for result in run_results
+        if result.get("semantic_valid_fraction_tensor") is not None
+    ]
+    semantic_defined_fractions = [
+        float(np.asarray(result["semantic_defined_tensor"][-1]).mean())
+        for result in run_results
+        if result.get("semantic_defined_tensor") is not None
+    ]
 
     aggregate_dir = artifact_root_path / profile_obj.name / "aggregate"
     aggregate_dir.mkdir(parents=True, exist_ok=True)
@@ -1214,6 +1240,17 @@ def analyze_profile_group(
             "final_top_pairs": mixed_behavior["final_top_pairs"],
             "final_top_triplets": mixed_behavior["final_top_triplets"],
         },
+        "induction_validation": induction_validation,
+        "semantic_valid_fraction_final_mean": (
+            float(np.mean(semantic_valid_fractions))
+            if semantic_valid_fractions
+            else None
+        ),
+        "semantic_defined_fraction_final_mean": (
+            float(np.mean(semantic_defined_fractions))
+            if semantic_defined_fractions
+            else None
+        ),
         "layer_count": int(per_layer_curves["n_layers"]),
         "timeline_figure": str(figure_path),
         "summary_path": str(summary_path),

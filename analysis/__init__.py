@@ -21,6 +21,7 @@ from .stability import (
 )
 from .phase_transition import (
     compute_induction_count_curve,
+    compute_induction_validation_summary,
     extract_val_loss_curve,
     find_crossing_steps,
     detect_val_loss_inflection,
@@ -52,6 +53,7 @@ __all__ = [
     "compute_per_type_stability",
     "print_stability_report",
     "compute_induction_count_curve",
+    "compute_induction_validation_summary",
     "extract_val_loss_curve",
     "find_crossing_steps",
     "detect_val_loss_inflection",
