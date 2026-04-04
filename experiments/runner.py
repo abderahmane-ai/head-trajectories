@@ -375,8 +375,10 @@ def _build_hf_probe_dataset(
         + n_induction_holdout
         + n_positional_holdout
     )
-    min_natural_induction = profile.n_induction
-    min_natural_induction_holdout = profile.n_induction_holdout
+    min_natural_induction = profile.n_induction if profile.enable_natural_induction else 0
+    min_natural_induction_holdout = (
+        profile.n_induction_holdout if profile.enable_natural_induction else 0
+    )
     minimum_needed = (
         fixed_needed + min_natural_induction + min_natural_induction_holdout
     )
@@ -386,10 +388,15 @@ def _build_hf_probe_dataset(
             f"but only {len(raw_sequences)} are available."
         )
 
-    desired_natural_induction = max(profile.n_induction * 8, profile.n_induction)
-    desired_natural_induction_holdout = max(
-        profile.n_induction_holdout * 8,
-        profile.n_induction_holdout,
+    desired_natural_induction = (
+        max(profile.n_induction * 8, profile.n_induction)
+        if profile.enable_natural_induction
+        else 0
+    )
+    desired_natural_induction_holdout = (
+        max(profile.n_induction_holdout * 8, profile.n_induction_holdout)
+        if profile.enable_natural_induction
+        else 0
     )
     desired_train_extra = desired_natural_induction - min_natural_induction
     desired_holdout_extra = (
@@ -419,8 +426,9 @@ def _build_hf_probe_dataset(
 
     n_natural_induction = min_natural_induction + train_extra
     n_natural_induction_holdout = min_natural_induction_holdout + holdout_extra
-    if n_natural_induction < desired_natural_induction or (
-        n_natural_induction_holdout < desired_natural_induction_holdout
+    if profile.enable_natural_induction and (
+        n_natural_induction < desired_natural_induction
+        or n_natural_induction_holdout < desired_natural_induction_holdout
     ):
         print(
             "[Probe] Limited held-out split detected; reducing natural induction "
@@ -459,12 +467,14 @@ def _build_hf_probe_dataset(
         block_size=profile.block_size,
         seed=seed,
     )
-    natural_built = _build_optional_natural_induction_probes(
-        pool_natural_induction,
-        n_probes=profile.n_induction,
-        block_size=profile.block_size,
-        seed=seed,
-    )
+    natural_built = None
+    if profile.enable_natural_induction:
+        natural_built = _build_optional_natural_induction_probes(
+            pool_natural_induction,
+            n_probes=profile.n_induction,
+            block_size=profile.block_size,
+            seed=seed,
+        )
     positional_seqs, positional_pairs = build_positional_probes(
         pool_positional,
         n_pairs=profile.n_pairs,
@@ -499,17 +509,18 @@ def _build_hf_probe_dataset(
         probe_dict["heldout_induction_seqs"] = held_seqs
         probe_dict["heldout_induction_p1"] = held_p1
         probe_dict["heldout_induction_p2"] = held_p2
-        held_natural_built = _build_optional_natural_induction_probes(
-            pool_natural_induction_holdout,
-            n_probes=profile.n_induction_holdout,
-            block_size=profile.block_size,
-            seed=seed + 5000,
-        )
-        if held_natural_built is not None:
-            nat_held_seqs, nat_held_p1, nat_held_p2 = held_natural_built
-            probe_dict["heldout_natural_induction_seqs"] = nat_held_seqs
-            probe_dict["heldout_natural_induction_p1"] = nat_held_p1
-            probe_dict["heldout_natural_induction_p2"] = nat_held_p2
+        if profile.enable_natural_induction:
+            held_natural_built = _build_optional_natural_induction_probes(
+                pool_natural_induction_holdout,
+                n_probes=profile.n_induction_holdout,
+                block_size=profile.block_size,
+                seed=seed + 5000,
+            )
+            if held_natural_built is not None:
+                nat_held_seqs, nat_held_p1, nat_held_p2 = held_natural_built
+                probe_dict["heldout_natural_induction_seqs"] = nat_held_seqs
+                probe_dict["heldout_natural_induction_p1"] = nat_held_p1
+                probe_dict["heldout_natural_induction_p2"] = nat_held_p2
     if profile.n_pairs_holdout > 0:
         held_pos_seqs, held_pos_pairs = build_positional_probes(
             pool_positional_holdout,
@@ -615,12 +626,13 @@ def build_or_load_probe_dataset(
             seed=0,
             n_general=profile_obj.n_general,
             n_induction=profile_obj.n_induction,
-            n_pairs=profile_obj.n_pairs,
-            n_general_holdout=profile_obj.n_general_holdout,
-            n_induction_holdout=profile_obj.n_induction_holdout,
-            n_pairs_holdout=profile_obj.n_pairs_holdout,
-            n_calibration_seeds=profile_obj.n_calibration_seeds,
-        )
+        n_pairs=profile_obj.n_pairs,
+        n_general_holdout=profile_obj.n_general_holdout,
+        n_induction_holdout=profile_obj.n_induction_holdout,
+        n_pairs_holdout=profile_obj.n_pairs_holdout,
+        n_calibration_seeds=profile_obj.n_calibration_seeds,
+        enable_natural_induction=profile_obj.enable_natural_induction,
+    )
 
     return _build_hf_probe_dataset(
         profile_obj,
@@ -1207,6 +1219,7 @@ def _profile_manifest(profile: ExperimentProfile) -> Dict[str, object]:
         "n_induction_holdout": profile.n_induction_holdout,
         "n_pairs_holdout": profile.n_pairs_holdout,
         "n_calibration_seeds": profile.n_calibration_seeds,
+        "enable_natural_induction": profile.enable_natural_induction,
         "checkpoint_steps": list(profile.checkpoint_steps),
         "model_config": {
             "n_layers": profile.model_config.n_layers,

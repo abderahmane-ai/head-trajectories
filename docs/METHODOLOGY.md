@@ -113,7 +113,7 @@ The probe dataset is partitioned into:
 
 - **general probes**
 - **induction probes**
-- **natural induction probes**
+- **natural induction probes** (optional, currently disabled by default)
 - **positional probes**
 
 Each partition is used for a specific subset of scores.

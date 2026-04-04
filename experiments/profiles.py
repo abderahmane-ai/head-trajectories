@@ -42,6 +42,7 @@ class ExperimentProfile:
     n_induction_holdout: int = 20
     n_pairs_holdout: int = 10
     n_calibration_seeds: int = 3
+    enable_natural_induction: bool = False
     checkpoint_steps: Tuple[int, ...] = field(default_factory=tuple)
     early_stopping_patience_ckpts: Optional[int] = None
     min_steps_before_early_stop: int = 0

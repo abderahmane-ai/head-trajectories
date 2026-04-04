@@ -438,6 +438,7 @@ def build_probe_dataset(
     n_calibration_seeds: int = 3,
     n_natural_induction: Optional[int] = None,
     n_natural_induction_holdout: Optional[int] = None,
+    enable_natural_induction: bool = False,
 ) -> Dict[str, torch.Tensor]:
     """
     Construct the full probe dataset and save to output_path.
@@ -459,6 +460,7 @@ def build_probe_dataset(
         n_calibration_seeds: number of random seeds for calibration
         n_natural_induction: number of natural induction probes; defaults to n_induction
         n_natural_induction_holdout: heldout natural induction probes; defaults to n_induction_holdout
+        enable_natural_induction: whether to build auxiliary natural-induction probes
 
     Returns:
         probe_dict: dictionary of all probe tensors (also saved to disk)
@@ -482,9 +484,12 @@ def build_probe_dataset(
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if n_natural_induction is None:
+    if not enable_natural_induction:
+        n_natural_induction = 0
+        n_natural_induction_holdout = 0
+    elif n_natural_induction is None:
         n_natural_induction = n_induction
-    if n_natural_induction_holdout is None:
+    if enable_natural_induction and n_natural_induction_holdout is None:
         n_natural_induction_holdout = n_induction_holdout
 
     # Load raw sequences from the probe split of OpenWebText
@@ -555,19 +560,19 @@ def build_probe_dataset(
         pool_induction, n_induction, (5, 10), block_size, seed
     )
 
-    print("\n  [4/6] Building natural induction probe sequences...")
-    natural_built = _build_optional_natural_induction_probes(
-        pool_natural_induction,
-        n_natural_induction,
-        block_size,
-        seed,
-    )
-    if natural_built is None:
-        natural_induction_seqs = None
-        natural_induction_p1 = None
-        natural_induction_p2 = None
-    else:
-        natural_induction_seqs, natural_induction_p1, natural_induction_p2 = natural_built
+    natural_induction_seqs = None
+    natural_induction_p1 = None
+    natural_induction_p2 = None
+    if enable_natural_induction and n_natural_induction > 0:
+        print("\n  [4/6] Building natural induction probe sequences...")
+        natural_built = _build_optional_natural_induction_probes(
+            pool_natural_induction,
+            n_natural_induction,
+            block_size,
+            seed,
+        )
+        if natural_built is not None:
+            natural_induction_seqs, natural_induction_p1, natural_induction_p2 = natural_built
 
     print("\n  [5/6] Building positional probe sequences...")
     positional_seqs, positional_pairs = build_positional_probes(
@@ -603,7 +608,7 @@ def build_probe_dataset(
                     block_size, heldout_seed
                 )
             )
-        if n_natural_induction_holdout > 0:
+        if enable_natural_induction and n_natural_induction_holdout > 0:
             natural_holdout_built = _build_optional_natural_induction_probes(
                 pool_natural_induction_holdout,
                 n_natural_induction_holdout,
@@ -778,7 +783,8 @@ def build_probe_dataset(
     print(f"  induction_seqs    : {induction_seqs.shape}")
     print(f"  induction_p1      : {induction_p1.shape}")
     print(f"  induction_p2      : {induction_p2.shape}")
-    print(f"  natural_induction : {natural_induction_seqs.shape}")
+    if natural_induction_seqs is not None:
+        print(f"  natural_induction : {natural_induction_seqs.shape}")
     print(f"  positional_seqs   : {positional_seqs.shape}")
     print(f"  positional_pairs  : {positional_pairs.shape}")
     if heldout_general_seqs is not None:
@@ -816,7 +822,6 @@ def load_probe_dataset(path: Path) -> Dict[str, torch.Tensor]:
 
     required_keys = {
         "general_seqs", "induction_seqs", "induction_p1", "induction_p2",
-        "natural_induction_seqs", "natural_induction_p1", "natural_induction_p2",
         "positional_seqs", "positional_pairs", "creation_seed", "block_size",
     }
 
