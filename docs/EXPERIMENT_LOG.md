@@ -6,15 +6,23 @@ This file is a historical log of early pilot runs. For current archived findings
 
 As of the current default methodology (`enable_natural_induction = false`), the strongest baseline conclusions come from the archived default-methodology WikiText and LM1B runs in `run_exports/`.
 
+Important archive note:
+
+- those archived baseline bundles remain scientifically useful
+- but the saved result files were produced before the repo started persisting the full native modern active-set schema
+- current code can still load and compare them, but some active-set-style fields are reconstructed through legacy compatibility paths
+- therefore they should be trusted most for dominant-label and cross-dataset conclusions, not for over-precise claims about modern saved-schema internals
+
 ### Cross-dataset result
 
 The clearest current empirical result is:
 
-- final head-type mixes are strongly dataset-sensitive
-- WikiText ends much more split between `PREV_TOKEN` and `SEMANTIC`
-- LM1B ends much more strongly `PREV_TOKEN`-dominated
+- both native current-schema runs are dominated by `AMBIGUOUS` summary labels rather than clean single-role endpoints
+- both datasets show near-universal `PREV_TOKEN` activity plus strong `SINK` co-activity
+- WikiText retains more `SEMANTIC`, more `INDUCTION`, more overall overlap, and much smaller dominant margins
+- LM1B is still mixed, but somewhat cleaner and more concentrated in `PREV_TOKEN > SINK`
 
-In other words, the dominant behavioral composition is not fixed by architecture alone; it depends strongly on the training corpus.
+In other words, the strongest dataset-sensitive quantity is now not just "which single label wins," but **how mixed the heads remain and which secondary behaviors persist**.
 
 ### Classification result
 
@@ -22,6 +30,7 @@ The other important current conclusion is:
 
 - many heads exhibit multiple statistically active behaviors simultaneously
 - dominant labels are still useful, but they compress substantial overlap
+- the newest native-schema WikiText and LM1B exports make this especially clear: both runs are mostly `AMBIGUOUS` at the dominant-summary level despite strong active behavior structure underneath
 
 This methodology change has now landed: the repository uses an **FDR-based multi-behavior classifier** built on the existing five scores and empirical null calibration.
 
@@ -38,11 +47,22 @@ Current classification/reporting now exposes:
 - `H1` (sink-first among learned types): not robust in current single-seed comparison runs
 - `H2` (ordered development): not robust in current single-seed comparison runs
 
+The codebase now has schema-matched native current-schema seed-42 exports for both:
+
+- `wikitext103_15m_preliminary`
+- `lm1b_15m_comparison`
+
+so the mixed-behavior cross-dataset comparison is now on a clean apples-to-apples footing at the single-seed level.
+
 ### Next run priority
 
-After the current WikiText and LM1B baselines, the next highest-value run is:
+After the current WikiText and LM1B baselines, the highest-value next work is:
 
-- `openwebtext_15m_main`
+- finish the direct WikiText-vs-LM1B native-schema comparison write-up
+- strengthen head-level order analysis
+- add synthetic validation and stronger calibration reporting before broadening scope
+
+OpenWebText remains a possible later extension rather than the automatic next step.
 
 ## Preliminary Pilot Run: `modal_a100_preliminary`
 
