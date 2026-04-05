@@ -3,8 +3,12 @@
 [![Tests](https://github.com/abderahmane-ai/head-trajectories/workflows/Tests/badge.svg)](https://github.com/abderahmane-ai/head-trajectories/actions)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![DOI](https://img.shields.io/badge/DOI-10.13140%2FRG.2.2.19447.18084-1f6feb.svg)](https://doi.org/10.13140/RG.2.2.19447.18084)
+[![ResearchGate](https://img.shields.io/badge/ResearchGate-Preprint-00CCBB?logo=researchgate&logoColor=white)](https://doi.org/10.13140/RG.2.2.19447.18084)
 
 > Tracking when and how attention heads specialize during transformer training
+
+Preprint: [ResearchGate / DOI 10.13140/RG.2.2.19447.18084](https://doi.org/10.13140/RG.2.2.19447.18084)
 
 Most interpretability work asks *what* attention heads do after training. This project asks *when* they become what they are. We train transformers from scratch with dense checkpointing, probe every head at every checkpoint, and track developmental trajectories from initialization to convergence.
 

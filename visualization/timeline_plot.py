@@ -50,14 +50,22 @@ def _format_training_axis(ax: plt.Axes, steps: np.ndarray) -> None:
     if len(steps) == 0:
         return
 
-    has_zero = bool(np.any(np.asarray(steps) <= 0))
+    steps = np.asarray(steps, dtype=float)
+    has_zero = bool(np.any(steps <= 0))
     if has_zero:
         ax.set_xscale("symlog", linthresh=1.0, linscale=1.0)
     else:
         ax.set_xscale("log")
 
     if len(steps) <= 16:
-        tick_steps = [int(s) for s in steps.tolist()]
+        candidate_ticks = [0, 50, 100, 200, 400, 800, 1200, 2500, 4000, 6000, 9000, 12000, 50000, 100000]
+        lo = int(np.min(steps))
+        hi = int(np.max(steps))
+        tick_steps = [s for s in candidate_ticks if lo <= s <= hi]
+        if len(tick_steps) > 7:
+            tick_steps = tick_steps[::2]
+        if hi not in tick_steps:
+            tick_steps.append(hi)
     else:
         candidate_ticks = [0, 50, 100, 200, 400, 800, 1200, 2500, 4000, 6000, 9000, 12000, 50000, 100000]
         lo = int(np.min(steps))
@@ -65,6 +73,12 @@ def _format_training_axis(ax: plt.Axes, steps: np.ndarray) -> None:
         tick_steps = [s for s in candidate_ticks if lo <= s <= hi]
         if not tick_steps:
             tick_steps = [int(steps[0]), int(steps[-1])]
+
+    tick_steps = sorted(set(int(s) for s in tick_steps))
+    if has_zero:
+        ax.set_xlim(left=0, right=float(np.max(steps)))
+    else:
+        ax.set_xlim(left=max(float(np.min(steps)), 1.0), right=float(np.max(steps)))
 
     ax.set_xticks(tick_steps)
     ax.xaxis.set_major_formatter(
