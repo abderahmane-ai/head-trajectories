@@ -38,7 +38,7 @@ Yes, but you'll need a GPU for training. The probing pipeline runs fine on CPU.
 - Immutable probe dataset
 - Deterministic analysis
 - All hyperparameters in code
-- Version-controlled thresholds
+- Version-controlled calibration artifacts
 
 ### What about statistical significance?
 The active methodology is now statistically grounded at the classifier layer: each head/metric score is compared to the pooled empirical null, one-sided empirical p-values are computed, and per-head BH-FDR is applied across the five behaviors. Robustness controls now focus on FDR-alpha sensitivity, null-subsample stability, and inter-seed agreement. Single-seed pilot or comparison runs should still be treated as exploratory rather than conclusive.
@@ -46,8 +46,8 @@ The active methodology is now statistically grounded at the classifier layer: ea
 ### Why not more seeds?
 Cost-benefit tradeoff. Multi-seed runs are the right standard for stronger claims, but notebook-scale exploratory runs are often done first to validate methodology, inspect score geometry, and compare datasets cheaply.
 
-### How were thresholds chosen?
-Calibration still comes from a random baseline: initialize random models (15M and 6M), causally scramble key positions within each valid attention row to destroy structured behavior while preserving causal row-stochastic attention, compute all 5 scores, and store the resulting empirical null. The repository still stores `mean + 2*std` / `p99` threshold summaries for diagnostics and legacy inspection, but the main classifier now uses the **full pooled null distribution** rather than a single scalar threshold per metric. See `data/calibration.py`.
+### How is calibration done?
+Calibration comes from a random baseline: initialize architecture-matched random models, causally scramble key positions within each valid attention row to destroy structured behavior while preserving causal row-stochastic attention, compute all 5 scores, and pool the resulting null samples across calibration seeds. The main classifier then uses this **pooled empirical null distribution** to compute one-sided empirical p-values before applying per-head BH-FDR. See `data/calibration.py`.
 
 ### What about other head types?
 The five types we study are the most well-documented. The framework is extensible - you can add new scoring functions.

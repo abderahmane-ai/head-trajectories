@@ -62,7 +62,7 @@ More concretely:
 
 ### Classification phase
 
-- Scores are compared against the **pooled empirical null distribution**, not only against scalar thresholds.
+- Scores are compared against the **pooled empirical null distribution**.
 - The results file preserves the full raw score tensor, active-behavior mask, empirical p-values, null-relative effect sizes, runner-up behavior, dominant margin, and dominant-summary label tensor.
 - The dominant-summary label space is now:
 
@@ -428,17 +428,11 @@ Interpretation:
 
 ---
 
-## 6. Null Calibration (with Diagnostic Threshold Summaries)
+## 6. Null Calibration
 
 Raw scores across the five metrics are **not directly comparable**. A score of $0.10$ may be highly meaningful for one metric and unremarkable for another.
 
-The project therefore calibrates an **empirical null distribution** for each metric (pooled across calibration seeds), and also derives a compact diagnostic threshold vector
-
-$$
-\tau = (\tau_{\text{sink}}, \tau_{\text{prev}}, \tau_{\text{ind}}, \tau_{\text{pos}}, \tau_{\text{sem}})
-$$
-
-from that null.
+The project therefore calibrates an **empirical null distribution** for each metric and pools those null samples across calibration seeds before classification.
 
 ### 6.1 Why calibration is needed
 
@@ -458,17 +452,10 @@ For a given architecture:
 
 This null matters for the sink metric in particular: row-shuffling leaves fixed-key aggregation largely unchanged, so the calibration baseline must scramble **keys within rows**, not rows themselves.
 
-If $r_{u,m}$ is the random-baseline score of head $u$ on metric $m$, define:
+If $r_{u,m}$ is the random-baseline score of head $u$ on metric $m$, then calibration produces a set of null samples
 
 $$
-\mu_m = \frac{1}{H_{\text{tot}}}\sum_{u=1}^{H_{\text{tot}}} r_{u,m},
-$$
-
-$$
-\sigma_m = \sqrt{
-\frac{1}{H_{\text{tot}}}
-\sum_{u=1}^{H_{\text{tot}}}(r_{u,m} - \mu_m)^2
-},
+\mathcal{R}_m = \{r_{u,m}\}_{u=1}^{H_{\text{tot}}},
 $$
 
 where
@@ -479,44 +466,29 @@ $$
 
 is the total number of heads in the model.
 
-Then the single-seed threshold is:
+Across calibration seeds, these headwise null samples are concatenated into one pooled empirical null per metric:
 
 $$
-\tau_m =
-\begin{cases}
-\mu_m + 2\sigma_m, & m \in \{\text{sink}, \text{prev-token}, \text{induction}, \text{positional}\}, \\
-Q_{0.99}(r_{\cdot,m}), & m = \text{semantic},
-\end{cases}
+\mathcal{R}^{\mathrm{pool}}_m
+=
+\bigcup_{s=1}^{S}
+\mathcal{R}^{(s)}_m.
 $$
 
-where \(Q_{0.99}(r_{\cdot,m})\) is the empirical 99th percentile of the semantic null scores across heads for that calibration seed.
-
-The semantic exception is intentional. The semantic metric is a signed Pearson-correlation statistic, and its null variance collapses sharply once per-position correlations are averaged into a final per-head score. In practice, using \(\mu_m + 2\sigma_m\) for semantic produced thresholds that were too permissive. A high null quantile is therefore used for semantic while the other four metrics retain the original mean-plus-two-standard-deviations rule.
-
-Important: these scalar thresholds are **not** the primary classification gate under the current default methodology. They are retained as:
-
-- compact diagnostics for calibration sanity checks and reporting
-- legacy-compatibility metadata for loading older result bundles
-- optional per-head reference features (e.g., `threshold_flags` / normalized scores) that help interpret overlap, but do not define statistical significance
-
-The primary decision layer uses pooled null samples to compute empirical p-values and applies BH-FDR (Section 7).
+This pooled empirical null is the calibration object used by the default classifier.
 
 ### 6.3 Multi-seed calibration
 
 The repository repeats this calibration across several random seeds and stores:
 
-- per-seed threshold vectors
 - per-seed metric means
 - per-seed metric standard deviations
 - per-seed metric quantiles (`p95`, `p99`)
 - per-seed headwise null-score arrays
 - pooled null-score arrays across calibration seeds
 - the calibration seed list used to generate those null scores
-- whether any threshold was non-positive and would require defensive sanitization at classification time
-- their empirical mean
-- their empirical standard deviation
 
-The pipeline stores the mean threshold across calibration seeds as a diagnostic summary, but the **default classifier** uses the pooled empirical null (p-values + BH-FDR) rather than threshold gating.
+The **default classifier** uses these pooled null-score arrays directly to compute empirical p-values before BH-FDR.
 
 ---
 
@@ -574,7 +546,7 @@ $$
 \end{cases}
 $$
 
-where $\delta$ is a fixed dominance-margin threshold.
+where $\delta$ is a fixed dominance margin.
 
 ### 7.3 Label space and saved outputs
 
@@ -595,10 +567,6 @@ Saved result tensors include:
 - primary and runner-up behaviors
 - dominant margins
 - active-behavior counts
-
-Threshold summaries (`mean+2std`/`p99`) are still stored as diagnostic/reference
-metadata and for legacy file compatibility, but they are no longer the primary
-classification gate.
 
 ---
 
@@ -831,7 +799,7 @@ This project therefore measures:
 For readers moving between the math and the implementation:
 
 - Probe construction: [data/probe.py](../data/probe.py)
-- Threshold calibration: [data/calibration.py](../data/calibration.py)
+- Empirical-null calibration: [data/calibration.py](../data/calibration.py)
 - Score definitions: [probing/scores.py](../probing/scores.py)
 - Classification: [probing/classifier.py](../probing/classifier.py)
 - Checkpoint extraction: [probing/extractor.py](../probing/extractor.py)
@@ -844,6 +812,6 @@ For readers moving between the math and the implementation:
 
 In one sentence:
 
-> The project trains a transformer from scratch, probes every attention head at every checkpoint with a fixed held-out dataset, scores heads on five interpretable behaviors, calibrates significance using random-baseline thresholds, and then studies the resulting label trajectories over training.
+> The project trains a transformer from scratch, probes every attention head at every checkpoint with a fixed held-out dataset, scores heads on five interpretable behaviors, calibrates significance using a random-baseline empirical null, and then studies the resulting label trajectories over training.
 
 That is the full methodology in its most compact form.

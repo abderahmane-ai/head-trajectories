@@ -532,7 +532,7 @@ def _build_hf_probe_dataset(
         probe_dict["heldout_positional_pairs"] = held_pos_pairs
 
     print(
-        "[Probe] Calibrating empirical null (and diagnostic thresholds) from random baseline "
+        "[Probe] Calibrating empirical null from random baseline "
         f"({profile.n_calibration_seeds} seeds, device={device})..."
     )
     thresholds_mean, thresholds_std, thresholds_per_seed, diag = calibrate_thresholds(
@@ -581,9 +581,8 @@ def _build_hf_probe_dataset(
     torch.save(probe_dict, output_path)
     verify_induction_probes(probe_dict)
     print(f"[Probe] Saved probe dataset to: {output_path}")
-    print(f"[Probe] Mean diagnostic thresholds (legacy/plots): {thresholds_mean.tolist()}")
-    print(f"[Probe] Diagnostic threshold stds (legacy/plots) : {thresholds_std.tolist()}")
-    print(f"[Probe] Threshold rules: {diag['threshold_rules']}")
+    print(f"[Probe] Pooled null calibration ready: {prefix}")
+    print(f"[Probe] Calibration seeds: {diag['null_seed_list']}")
     print(f"[Probe] Requires sanitization: {diag['requires_sanitization']}")
     return probe_dict
 

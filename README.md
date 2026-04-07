@@ -12,7 +12,7 @@ Preprint: [ResearchGate / DOI 10.13140/RG.2.2.19447.18084](https://doi.org/10.13
 
 Most interpretability work asks *what* attention heads do after training. This project asks *when* they become what they are. We train transformers from scratch with dense checkpointing, probe every head at every checkpoint, and track developmental trajectories from initialization to convergence.
 
-**Current evidence:** The pipeline is stable, and the current methodology now uses **FDR-based multi-behavior inference** rather than heuristic threshold-normalized winner-take-all labeling. The strongest current empirical result remains that final head-type mixes are dataset-sensitive, `PREV_TOKEN` is usually the clearest dominant learned behavior, `SEMANTIC` can appear early and remains calibration-sensitive, and many heads exhibit multiple statistically active behaviors even when the report view assigns one dominant summary label.
+**Current evidence:** The pipeline is stable, and the current methodology uses **empirical-null-calibrated, FDR-based multi-behavior inference** rather than forced winner-take-all labeling. The strongest current empirical result remains that final head-type mixes are dataset-sensitive, `PREV_TOKEN` is usually the clearest dominant learned behavior, `SEMANTIC` can appear early and remains calibration-sensitive, and many heads exhibit multiple statistically active behaviors even when the report view assigns one dominant summary label.
 
 ## Quick Start
 
@@ -45,7 +45,7 @@ Containerized setup is documented in [docs/CONTAINER.md](docs/CONTAINER.md).
 - **POSITIONAL**: Content-invariant attention (KL divergence)
 - **SEMANTIC**: Internal semantic alignment in the model's current embedding space (masked; validity tracked explicitly)
 
-**Classification:** Thresholds are still calibrated from a causally scrambled random baseline, but they are now diagnostic/reference quantities rather than the main decision rule. The classifier uses the **pooled empirical null**, computes one-sided empirical p-values per metric, applies **per-head BH-FDR** across the five behaviors, treats the surviving metrics as the head’s **active behavior set**, and then assigns a dominant summary label only if one surviving behavior clears a fixed effect-size margin. Non-specialized states are now split into `WEAK` (no behaviors survive) and `AMBIGUOUS` (multiple survive without a clear winner). Undefined semantic measurements are tracked explicitly and treated as inactive rather than silently counted as semantic evidence.
+**Classification:** The classifier uses the **pooled empirical null**, computes one-sided empirical p-values per metric, applies **per-head BH-FDR** across the five behaviors, treats the surviving metrics as the head’s **active behavior set**, and then assigns a dominant summary label only if one surviving behavior clears a fixed effect-size margin. Non-specialized states are now split into `WEAK` (no behaviors survive) and `AMBIGUOUS` (multiple survive without a clear winner). Undefined semantic measurements are tracked explicitly and treated as inactive rather than silently counted as semantic evidence.
 
 See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for mathematical specification.
 
@@ -65,7 +65,7 @@ The repository evaluates five canonical hypotheses:
 
 ```
 ├── model/              Transformer implementation (RoPE, RMSNorm, SwiGLU)
-├── data/               Probe construction + threshold calibration
+├── data/               Probe construction + empirical-null calibration
 ├── training/           Training loop with checkpoint schedule
 ├── probing/            Attention extraction + 5 scoring functions
 ├── analysis/           Trajectory analysis + hypothesis tests
@@ -80,7 +80,7 @@ The repository evaluates five canonical hypotheses:
 - `run_probing.py` — Score all heads at all checkpoints
 - `run_analysis.py` — Generate figures + hypothesis verdicts
 - `probing/scores.py` — Five behavioral metrics
-- `data/calibration.py` — Threshold calibration from random baseline
+- `data/calibration.py` — Empirical-null calibration from random baseline
 
 ## Compute Requirements
 

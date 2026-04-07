@@ -248,7 +248,7 @@ modal token set --token-id YOUR_TOKEN_ID --token-secret YOUR_TOKEN_SECRET
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) for codebase overview
 - Read [METHODOLOGY.md](METHODOLOGY.md) for the formal experimental and mathematical specification
-- Read [FAQ.md](FAQ.md) for interpretation notes on thresholds, dominant labels, and mixed behaviors
+- Read [FAQ.md](FAQ.md) for interpretation notes on dominant labels, active behavior sets, and mixed behaviors
 - See [CONTRIBUTING.md](../CONTRIBUTING.md) for development guidelines
 - Check [README.md](../README.md) for full documentation
 - Explore the test suite in `tests/` for usage examples

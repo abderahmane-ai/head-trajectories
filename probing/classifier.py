@@ -6,10 +6,10 @@ New default methodology:
   2. Apply per-head BH-FDR across the 5 metrics
   3. Treat the surviving metrics as the head's active behavior set
   4. Assign a dominant summary label only if one surviving behavior clears
-     the dominance-margin threshold in null-relative effect-size space
+     a fixed dominance margin in null-relative effect-size space
 
-Legacy threshold-normalized classification remains available only for
-loading/analyzing old results and compatibility utilities. It is deprecated.
+Legacy compatibility paths remain available only for loading/analyzing
+old results and compatibility utilities. They are deprecated.
 """
 
 from __future__ import annotations

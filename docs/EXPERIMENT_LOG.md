@@ -84,11 +84,11 @@ OpenWebText remains a possible later extension rather than the automatic next st
 - **Induction probes:** 64 sequences (100% success rate in capturing repeated subsequences)
 - **Positional probes:** 32 pairs (64 sequences total)
 
-### Threshold Calibration
-Random-baseline thresholds computed over 3 random seeds:
-- **Raw pilot thresholds:** `[0.028, 0.0039, 0.0096, 0.000, -0.036]`
+### Pilot Calibration Diagnostics
+Random-baseline calibration summaries were first computed over 3 random seeds:
+- **Raw pilot calibration vector:** `[0.028, 0.0039, 0.0096, 0.000, -0.036]`
 
-*(Note: These raw pilot thresholds exposed a calibration/classification fragility. The main codebase now treats non-positive thresholds as a calibration diagnostic and applies defensive sanitization only for safe normalization.)*
+*(Note: These pilot diagnostics exposed a calibration/classification fragility. The main codebase now uses pooled empirical-null inference as the primary decision layer, with defensive compatibility handling only for legacy reference fields.)*
 
 ### Training Dynamics
 The model learned smoothly over 12,000 steps:
@@ -100,11 +100,11 @@ The model learned smoothly over 12,000 steps:
 ## Findings & Trajectory Analysis
 
 ### Onset Steps ($\ge$ 5% of heads)
-When did each head type cross the 5% threshold (at least 3 heads exhibiting the behavior)?
+When did each head type cross the 5% mark (at least 3 heads exhibiting the behavior)?
 *   **POSITIONAL:** 0
 *   **PREV_TOKEN:** 400
 *   **SINK:** 800
-*   **UNDIFFERENTIATED, INDUCTION, SEMANTIC:** None (Below 5% threshold)
+*   **UNDIFFERENTIATED, INDUCTION, SEMANTIC:** None (Below 5%)
 
 Note: this pilot section uses the old label vocabulary from that period. In the
 current default methodology, `UNDIFFERENTIATED` has been replaced by

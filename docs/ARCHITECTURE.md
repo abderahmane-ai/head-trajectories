@@ -15,7 +15,7 @@ head-trajectories/
 ├── data/               # Data loading and preprocessing
 │   ├── loader.py       # Streaming text loader for long OpenWebText runs
 │   ├── probe.py        # Probe dataset construction
-│   └── calibration.py  # Threshold calibration
+│   └── calibration.py  # Empirical-null calibration
 │
 ├── training/           # Training loop
 │   ├── trainer.py      # Main training logic
@@ -207,5 +207,5 @@ visualization/
 
 ### Version Control
 - All hyperparameters in `ModelConfig`
-- Thresholds stored in results files
+- Calibration metadata stored in results files
 - Git commit hash could be added to checkpoints

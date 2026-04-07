@@ -302,12 +302,12 @@ def run_probing_pipeline(
     pooled_null_scores = probe_dict.get(f"{thresholds_key}_null_scores_pooled")
     if thresholds is None:
         print(
-            f"  [WARNING] No calibrated thresholds found under "
-            f"{thresholds_key}; falling back to default thresholds."
+            f"  [WARNING] No diagnostic calibration vector found under "
+            f"{thresholds_key}; using compatibility defaults for legacy reference fields."
         )
         thresholds = THRESHOLDS
     else:
-        print(f"  Using calibrated thresholds: {thresholds_key}")
+        print(f"  Using empirical-null calibration bundle: {thresholds_key}")
     if pooled_null_scores is None:
         raise RuntimeError(
             f"Probe dataset is missing pooled null scores for {thresholds_key}. "
